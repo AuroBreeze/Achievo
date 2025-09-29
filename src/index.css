@@ -5,3 +5,9 @@
 :root { color-scheme: dark; }
 
 button { transition: background-color 0.2s ease; }
+
+/* Make the custom titlebar draggable, and interactive elements non-draggable */
+.titlebar { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+html, body, #root { height: 100%; }

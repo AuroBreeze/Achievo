@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('api', {
+  // app features
   analyzeDiff: (payload: { before: string; after: string }) => ipcRenderer.invoke('analyze:diff', payload),
   getHistory: () => ipcRenderer.invoke('history:get'),
   getConfig: () => ipcRenderer.invoke('config:get'),
@@ -12,4 +13,15 @@ contextBridge.exposeInMainWorld('api', {
   statsGetToday: () => ipcRenderer.invoke('stats:getToday'),
   statsGetRange: (payload: { startDate: string; endDate: string }) => ipcRenderer.invoke('stats:getRange', payload),
   summaryGenerate: () => ipcRenderer.invoke('summary:generate'),
+
+  // window controls
+  windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+  windowToggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+  windowIsMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  windowClose: () => ipcRenderer.invoke('window:close'),
+  onWindowMaximizeChanged: (callback: (isMax: boolean) => void) => {
+    const listener = (_: unknown, isMax: boolean) => callback(isMax);
+    ipcRenderer.on('window:maximize-changed', listener);
+    return () => ipcRenderer.removeListener('window:maximize-changed', listener);
+  },
 });

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { analyzeDiff } from './services/codeAnalyzer';
@@ -15,15 +15,36 @@ const storage = new Storage();
 const tracker = new TrackerService();
 const stats = new StatsService();
 
+let win: BrowserWindow | null = null;
+
 async function createWindow() {
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     width: 1100,
     height: 800,
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#0f172a',
+      symbolColor: '#cbd5e1',
+      height: 36,
+    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
     },
+  });
+
+  // Hide application menu and native menu bar
+  Menu.setApplicationMenu(null);
+  win.setMenuBarVisibility(false);
+
+  // Forward maximize state changes to renderer
+  win.on('maximize', () => {
+    win?.webContents.send('window:maximize-changed', true);
+  });
+  win.on('unmaximize', () => {
+    win?.webContents.send('window:maximize-changed', false);
   });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
@@ -116,4 +137,27 @@ ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endD
 
 ipcMain.handle('summary:generate', async () => {
   return stats.generateOnDemandSummary();
+});
+
+// Window control handlers
+ipcMain.handle('window:minimize', async () => {
+  win?.minimize();
+});
+
+ipcMain.handle('window:toggleMaximize', async () => {
+  if (!win) return;
+  if (win.isMaximized()) {
+    win.unmaximize();
+  } else {
+    win.maximize();
+  }
+  return win.isMaximized();
+});
+
+ipcMain.handle('window:isMaximized', async () => {
+  return win?.isMaximized() ?? false;
+});
+
+ipcMain.handle('window:close', async () => {
+  win?.close();
 });
