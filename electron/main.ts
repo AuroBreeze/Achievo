@@ -167,6 +167,11 @@ ipcMain.handle('summary:todayDiff', async () => {
   const today = `${yyyy}-${mm}-${dd}`;
   const diff = await git.getUnifiedDiffSinceDate(today);
   const summary = await summarizeUnifiedDiff(diff);
+  // Persist the AI summary to history (score set to 0 for now)
+  try {
+    const record = { timestamp: Date.now(), score: 0, summary };
+    await storage.append(record);
+  } catch {}
   return { date: today, summary };
 });
 

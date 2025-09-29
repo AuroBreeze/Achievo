@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const Dashboard: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [today, setToday] = useState<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null } | null>(null);
-  const [genBusy, setGenBusy] = useState(false);
   const [todayBusy, setTodayBusy] = useState(false);
   const [todayText, setTodayText] = useState('');
   const [diffOpen, setDiffOpen] = useState(false);
@@ -52,20 +53,6 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const generateSummary = async () => {
-    if (!window.api) return;
-    setGenBusy(true);
-    setError('');
-    try {
-      await window.api.summaryGenerate();
-      await loadToday();
-    } catch (e: any) {
-      setError(e?.message ?? '生成总结失败');
-    } finally {
-      setGenBusy(false);
-    }
-  };
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -87,14 +74,17 @@ const Dashboard: React.FC = () => {
         </div>
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">
-        <button onClick={generateSummary} disabled={genBusy} className="px-4 py-2 rounded bg-emerald-600 disabled:opacity-60">{genBusy ? '生成中…' : '生成今日总结（上次总结日至今）'}</button>
-        <button onClick={generateTodaySummary} disabled={todayBusy} className="px-4 py-2 rounded bg-indigo-600 disabled:opacity-60">{todayBusy ? '生成中…' : '生成今日总结（今天以来）'}</button>
+        <button onClick={generateTodaySummary} disabled={todayBusy} className="px-4 py-2 rounded bg-indigo-600 disabled:opacity-60">{todayBusy ? '生成中…' : '生成今日总结'}</button>
         <button onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }} className="px-4 py-2 rounded bg-slate-700">{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
       </section>
       <section className="lg:col-span-2 bg-slate-800 rounded p-4">
         <h3 className="font-medium">AI 总结</h3>
-        <pre className="whitespace-pre-wrap mt-2 text-slate-200">{todayText || today?.summary || '—'}</pre>
+        <div className="prose prose-invert max-w-none mt-2 text-slate-200">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {todayText || today?.summary || '—'}
+          </ReactMarkdown>
+        </div>
       </section>
       {diffOpen && (
         <section className="lg:col-span-2 bg-slate-900 rounded border border-slate-800 overflow-hidden">
