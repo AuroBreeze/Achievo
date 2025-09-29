@@ -55,4 +55,17 @@ export class GitAnalyzer {
     }
     return { insertions, deletions };
   }
+
+  // Get unified diff text since the last commit before the given ISO date (YYYY-MM-DD)
+  async getUnifiedDiffSinceDate(date: string): Promise<string> {
+    // Find last commit before the start of the day
+    const before = `${date} 00:00`;
+    const base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
+    if (!base) {
+      // No base before the day; return diff from first commit to HEAD as best effort
+      return this.git.raw(['show', 'HEAD']);
+    }
+    const out = await this.git.raw(['diff', `${base}..HEAD`]);
+    return out;
+  }
 }

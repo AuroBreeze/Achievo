@@ -76,4 +76,16 @@ export class TrackerService {
       this.lastError = (e as Error).message;
     }
   }
+
+  // Run a single analysis without starting any timer
+  async analyzeOnce(repoPath?: string) {
+    const cfg = await getConfig();
+    if (repoPath) cfg.repoPath = repoPath;
+    await setConfig(cfg);
+
+    this.repoPath = cfg.repoPath;
+    if (!this.repoPath) throw new Error('未设置仓库路径');
+    await this.tick();
+    return this.status();
+  }
 }

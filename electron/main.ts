@@ -4,11 +4,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { analyzeDiff } from './services/codeAnalyzer';
 import { scoreProgress } from './services/progressScorer';
-import { summarizeWithAI } from './services/aiSummarizer';
+import { summarizeWithAI, summarizeUnifiedDiff } from './services/aiSummarizer';
 import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
+import { GitAnalyzer } from './services/gitAnalyzer';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
@@ -137,6 +138,24 @@ ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endD
 
 ipcMain.handle('summary:generate', async () => {
   return stats.generateOnDemandSummary();
+});
+
+// Manual one-shot analyze (no timers)
+ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string }) => {
+  const st = await tracker.analyzeOnce(payload?.repoPath);
+  return st;
+});
+
+// Summarize today's concrete code changes via unified diff
+ipcMain.handle('summary:todayDiff', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new GitAnalyzer(repo);
+  const today = new Date().toISOString().slice(0, 10);
+  const diff = await git.getUnifiedDiffSinceDate(today);
+  const summary = await summarizeUnifiedDiff(diff);
+  return { date: today, summary };
 });
 
 // Window control handlers

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   statsGetToday: () => ipcRenderer.invoke('stats:getToday'),
   statsGetRange: (payload: { startDate: string; endDate: string }) => ipcRenderer.invoke('stats:getRange', payload),
   summaryGenerate: () => ipcRenderer.invoke('summary:generate'),
+  trackingAnalyzeOnce: (payload: { repoPath?: string }) => ipcRenderer.invoke('tracking:analyzeOnce', payload),
+  summaryTodayDiff: () => ipcRenderer.invoke('summary:todayDiff'),
 
   // window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),

@@ -31,7 +31,6 @@ const Settings: React.FC = () => {
     setAiApiKey(cfg.aiApiKey ?? '');
     const st = await window.api.trackingStatus();
     setStatus(st);
-    if (st.intervalMs) setIntervalMs(st.intervalMs);
   };
 
   useEffect(() => {
@@ -63,37 +62,10 @@ const Settings: React.FC = () => {
     }
   };
 
-  const startTracking = async () => {
-    if (!window.api) return;
-    setBusy(true);
-    try {
-      const st = await window.api.trackingStart({ repoPath, intervalMs });
-      setStatus(st);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stopTracking = async () => {
-    if (!window.api) return;
-    setBusy(true);
-    try {
-      const st = await window.api.trackingStop();
-      setStatus(st);
-    } finally {
-      setBusy(false);
-    }
-  };
+  // 设置页面仅用于配置与保存
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <div className="space-y-2">
-        <label className="block text-sm">OpenAI API Key</label>
-        <input value={apiKey} onChange={e=>setApiKey(e.target.value)} className="w-full bg-slate-800 rounded p-2" placeholder="sk-..." />
-        <button onClick={save} className="mt-2 px-3 py-1 rounded bg-indigo-600">保存</button>
-        {saved && <span className="text-green-400 ml-2">{saved}</span>}
-      </div>
-
       <div className="space-y-2">
         <div className="font-medium">AI 提供商与模型</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -127,25 +99,15 @@ const Settings: React.FC = () => {
           <input value={repoPath} onChange={e=>setRepoPath(e.target.value)} className="flex-1 bg-slate-800 rounded p-2" placeholder="d:/code/project" />
           <button onClick={selectFolder} className="px-3 py-1 rounded bg-slate-700">选择文件夹</button>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm">轮询间隔(ms)</label>
-          <input type="number" min={1000} step={1000} value={intervalMs} onChange={e=>setIntervalMs(parseInt(e.target.value || '30000', 10))} className="w-40 bg-slate-800 rounded p-2" />
-        </div>
-        <div className="flex gap-2">
-          <button onClick={startTracking} disabled={busy || !repoPath} className="px-3 py-1 rounded bg-green-600 disabled:opacity-60">开始跟踪</button>
-          <button onClick={stopTracking} disabled={busy || !status.running} className="px-3 py-1 rounded bg-red-600 disabled:opacity-60">停止跟踪</button>
-        </div>
       </div>
 
-      <div className="bg-slate-800 rounded p-3">
-        <div className="font-medium">跟踪状态</div>
-        <div className="text-sm mt-2 space-y-1">
-          <div>运行中：{String(status.running)}</div>
-          <div>仓库：{status.repoPath || '—'}</div>
-          <div>间隔：{status.intervalMs ?? intervalMs} ms</div>
-          <div>最后处理提交：{status.lastProcessedCommit || '—'}</div>
-          {status.lastError && <div className="text-red-400">错误：{status.lastError}</div>}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <button onClick={save} className="px-3 py-1 rounded bg-indigo-600">保存设置</button>
+          {saved && <span className="text-green-400">{saved}</span>}
         </div>
+
+        {/* 设置页不再展示手动分析结果 */}
       </div>
     </div>
   );

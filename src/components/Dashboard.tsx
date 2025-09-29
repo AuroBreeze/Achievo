@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
 
 const Dashboard: React.FC = () => {
-  const [before, setBefore] = useState('');
-  const [after, setAfter] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [score, setScore] = useState<number | null>(null);
-  const [summary, setSummary] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [today, setToday] = useState<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null } | null>(null);
   const [genBusy, setGenBusy] = useState(false);
+  const [todayBusy, setTodayBusy] = useState(false);
+  const [todayText, setTodayText] = useState('');
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -22,16 +19,20 @@ const Dashboard: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  const analyze = async () => {
-    setLoading(true); setError(''); setSummary(''); setScore(null);
+  const generateTodaySummary = async () => {
+    if (!window.api) return;
+    setTodayBusy(true);
+    setError('');
     try {
-      if (!window.api) throw new Error('预加载 API 不可用');
-      const result = await window.api.analyzeDiff({ before, after });
-      setScore(result.score);
-      setSummary(result.summary);
+      await window.api.trackingAnalyzeOnce({});
+      const res = await window.api.summaryTodayDiff();
+      setTodayText(res.summary || '（无内容）');
+      await loadToday();
     } catch (e: any) {
-      setError(e?.message ?? '分析失败');
-    } finally { setLoading(false); }
+      setError(e?.message ?? '生成今日总结失败');
+    } finally {
+      setTodayBusy(false);
+    }
   };
 
   const generateSummary = async () => {
@@ -70,29 +71,12 @@ const Dashboard: React.FC = () => {
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">
         <button onClick={generateSummary} disabled={genBusy} className="px-4 py-2 rounded bg-emerald-600 disabled:opacity-60">{genBusy ? '生成中…' : '生成今日总结（上次总结日至今）'}</button>
-        {today?.summary && <span className="text-slate-300">已有总结</span>}
-      </section>
-      <section>
-        <h2 className="font-semibold mb-2">Before</h2>
-        <textarea value={before} onChange={e=>setBefore(e.target.value)} className="w-full h-64 bg-slate-800 rounded p-2" placeholder="粘贴修改前代码" />
-      </section>
-      <section>
-        <h2 className="font-semibold mb-2">After</h2>
-        <textarea value={after} onChange={e=>setAfter(e.target.value)} className="w-full h-64 bg-slate-800 rounded p-2" placeholder="粘贴修改后代码" />
-      </section>
-      <section className="lg:col-span-2 flex items-center gap-2">
-        <button onClick={analyze} disabled={loading} className="px-4 py-2 rounded bg-indigo-600 disabled:opacity-60">{loading ? '分析中…' : '分析并打分'}</button>
+        <button onClick={generateTodaySummary} disabled={todayBusy} className="px-4 py-2 rounded bg-indigo-600 disabled:opacity-60">{todayBusy ? '生成中…' : '生成今日总结（今天以来）'}</button>
         {error && <span className="text-red-400">{error}</span>}
       </section>
-      <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-slate-800 rounded p-4">
-          <h3 className="font-medium">进步分数</h3>
-          <div className="text-4xl font-bold mt-2">{score ?? '-'}</div>
-        </div>
-        <div className="md:col-span-2 bg-slate-800 rounded p-4">
-          <h3 className="font-medium">AI 总结</h3>
-          <pre className="whitespace-pre-wrap mt-2 text-slate-200">{(today?.summary || summary) || '—'}</pre>
-        </div>
+      <section className="lg:col-span-2 bg-slate-800 rounded p-4">
+        <h3 className="font-medium">AI 总结</h3>
+        <pre className="whitespace-pre-wrap mt-2 text-slate-200">{todayText || today?.summary || '—'}</pre>
       </section>
     </div>
   );
