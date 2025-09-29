@@ -28,6 +28,23 @@ export async function summarizeWithAI(diff: DiffStat, score: number): Promise<st
 }
 
 export async function summarizeUnifiedDiff(diffText: string): Promise<string> {
+  // Quick local heuristic: only short-circuit when truly empty
+  try {
+    const trimmed = diffText.trim();
+    if (!trimmed) return '今日无代码改动';
+    // If there is at least a diff header, proceed to AI summary regardless of +/- counts
+    if (!trimmed.includes('diff --git')) {
+      // Fallback check for any +/- lines excluding headers
+      const lines = trimmed.split(/\r?\n/);
+      let signal = false;
+      for (const l of lines) {
+        if (l.startsWith('+++') || l.startsWith('---') || l.startsWith('@@')) continue;
+        if (l.startsWith('+') || l.startsWith('-')) { signal = true; break; }
+      }
+      if (!signal) return '今日无代码改动';
+    }
+  } catch {}
+
   const cfg = await getConfig();
   const provider = cfg.aiProvider || 'openai';
   const model = cfg.aiModel || (provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini');
@@ -36,13 +53,17 @@ export async function summarizeUnifiedDiff(diffText: string): Promise<string> {
   if (!apiKey) throw new Error('缺少 AI API Key');
 
   const client = new OpenAI({ apiKey, baseURL });
-  const system = '你是资深代码审阅助手，会基于统一 diff 内容，按文件和变更类型（新增/删除/重构/重命名/重要逻辑变动）提炼要点，突出对质量、性能、安全性、可维护性的影响，并给出简明建议。';
+  const system = '你是资深代码审阅助手，会基于统一 diff 内容，按文件和变更类型（新增/删除/重构/重命名/重要逻辑变动）提炼要点，突出对质量、性能、安全性、可维护性的影响，并给出简明建议。若输入中确有改动，请不要回答“无改动”。';
+  // 限长，避免超出上限
+  const snippet = diffText.slice(0, 60000);
+  // 附加显式提醒，减少“误判为无改动”的概率
   const user = `请用中文总结以下“今天以来”的代码改动（统一 diff 文本）。输出包含：\n`
     + `1) 关键变更点（按文件归纳）\n`
     + `2) 价值/风险\n`
     + `3) 后续行动建议\n`
+    + `注意：如果 diff 中存在新增或删除行，请不要回答“无改动”。\n`
     + `---\n`
-    + diffText.slice(0, 60000); // 限长，避免超出上限
+    + snippet;
 
   const resp = await client.chat.completions.create({
     model,
