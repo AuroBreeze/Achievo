@@ -25,6 +25,36 @@ export class DB {
     this.ready = this.init();
   }
 
+  async setDayCounts(date: string, insertions: number, deletions: number) {
+    await this.ready;
+    const now = Date.now();
+    const ins = Math.max(0, Math.round(insertions));
+    const del = Math.max(0, Math.round(deletions));
+    const baseScore = this.computeBaseScore(ins, del);
+    const y = this.getYesterday(date);
+    const yesterday = y ? await this.getDay(y) : null;
+    const trend = yesterday ? baseScore - yesterday.baseScore : 0;
+    const exists = await this.getDay(date);
+    if (!exists) {
+      this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [date, ins, del, baseScore, trend, null, now, now]);
+    } else {
+      this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
+        [ins, del, baseScore, trend, now, date]);
+    }
+    await this.persist();
+  }
+
+  async getTotals(): Promise<{ insertions: number; deletions: number; total: number }> {
+    await this.ready;
+    const res = this.db.exec(`SELECT SUM(insertions) AS ins, SUM(deletions) AS del FROM days`);
+    if (!res[0] || !res[0].values[0]) return { insertions: 0, deletions: 0, total: 0 };
+    const row = mapRow<any>(res[0])[0];
+    const ins = Math.round(row.ins || 0);
+    const del = Math.round(row.del || 0);
+    return { insertions: ins, deletions: del, total: ins + del };
+  }
+
   private async init() {
     this.sqlite = await initSqlJs({
       locateFile: (file: string) => {

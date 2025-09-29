@@ -180,6 +180,12 @@ ipcMain.handle('summary:todayDiff', async () => {
     markdown = jsonText || '';
   }
 
+  // 计算并同步保存“今天以来”的插入/删除
+  try {
+    const ns = await git.getNumstatSinceDate(today);
+    await db.setDayCounts(today, ns.insertions, ns.deletions);
+  } catch {}
+
   // 确保今日有记录并保存 markdown 与分数
   try {
     const existed = await db.getDay(today);
@@ -211,6 +217,47 @@ ipcMain.handle('diff:today', async () => {
   const today = `${yyyy}-${mm}-${dd}`;
   const diff = await git.getUnifiedDiffSinceDate(today);
   return { date: today, diff };
+});
+
+// Totals across all days
+ipcMain.handle('stats:getTotals', async () => {
+  return db.getTotals();
+});
+
+// Live Git-based today's insertions/deletions (includes working tree)
+ipcMain.handle('stats:getTodayLive', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new GitAnalyzer(repo);
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  const ns = await git.getNumstatSinceDate(today);
+  return { date: today, insertions: ns.insertions, deletions: ns.deletions };
+});
+
+// Live totals: adjust DB totals by replacing today's DB counts with live Git counts
+ipcMain.handle('stats:getTotalsLive', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new GitAnalyzer(repo);
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  const totals = await db.getTotals();
+  const todayRow = await db.getDay(today);
+  const live = await git.getNumstatSinceDate(today);
+  const dbTodayIns = todayRow?.insertions || 0;
+  const dbTodayDel = todayRow?.deletions || 0;
+  const adjIns = Math.max(0, (totals.insertions || 0) - dbTodayIns + live.insertions);
+  const adjDel = Math.max(0, (totals.deletions || 0) - dbTodayDel + live.deletions);
+  return { insertions: adjIns, deletions: adjDel, total: adjIns + adjDel };
 });
 
 // Window control handlers

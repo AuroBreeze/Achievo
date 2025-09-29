@@ -10,11 +10,32 @@ const Dashboard: React.FC = () => {
   const [diffOpen, setDiffOpen] = useState(false);
   const [diffBusy, setDiffBusy] = useState(false);
   const [diffText, setDiffText] = useState('');
+  const [totals, setTotals] = useState<{ insertions: number; deletions: number; total: number } | null>(null);
+  const [todayLive, setTodayLive] = useState<{ date: string; insertions: number; deletions: number } | null>(null);
 
   const loadToday = async () => {
     if (!window.api) return;
     const t = await window.api.statsGetToday();
     setToday(t);
+  };
+
+  const loadTotals = async () => {
+    if (!window.api) return;
+    let t2: { insertions: number; deletions: number; total: number } | null = null;
+    try {
+      t2 = await window.api.statsGetTotalsLive();
+    } catch {
+      t2 = await window.api.statsGetTotals();
+    }
+    setTotals(t2);
+  };
+
+  const loadTodayLive = async () => {
+    if (!window.api) return;
+    try {
+      const r = await window.api.statsGetTodayLive();
+      setTodayLive(r);
+    } catch {}
   };
 
   const loadTodayDiff = async () => {
@@ -33,7 +54,9 @@ const Dashboard: React.FC = () => {
 
   React.useEffect(() => {
     loadToday();
-    const id = setInterval(loadToday, 10000);
+    loadTotals();
+    loadTodayLive();
+    const id = setInterval(() => { loadToday(); loadTotals(); loadTodayLive(); }, 10000);
     return () => clearInterval(id);
   }, []);
 
@@ -46,6 +69,8 @@ const Dashboard: React.FC = () => {
       const res = await window.api.summaryTodayDiff();
       setTodayText(res.summary || '（无内容）');
       await loadToday();
+      await loadTotals();
+      await loadTodayLive();
     } catch (e: any) {
       setError(e?.message ?? '生成今日总结失败');
     } finally {
@@ -58,11 +83,11 @@ const Dashboard: React.FC = () => {
       <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-slate-800 rounded p-4">
           <div className="text-sm opacity-75">今日新增</div>
-          <div className="text-2xl font-semibold">{today?.insertions ?? '-'}</div>
+          <div className="text-2xl font-semibold">{(todayLive?.insertions ?? today?.insertions) ?? '-'}</div>
         </div>
         <div className="bg-slate-800 rounded p-4">
           <div className="text-sm opacity-75">今日删除</div>
-          <div className="text-2xl font-semibold">{today?.deletions ?? '-'}</div>
+          <div className="text-2xl font-semibold">{(todayLive?.deletions ?? today?.deletions) ?? '-'}</div>
         </div>
         <div className="bg-slate-800 rounded p-4">
           <div className="text-sm opacity-75">基础分</div>
@@ -71,6 +96,11 @@ const Dashboard: React.FC = () => {
         <div className="bg-slate-800 rounded p-4">
           <div className="text-sm opacity-75">趋势(较昨日)</div>
           <div className={`text-2xl font-semibold ${((today?.trend||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{today?.trend ?? '-'}</div>
+        </div>
+        <div className="bg-slate-800 rounded p-4 md:col-span-1">
+          <div className="text-sm opacity-75">总改动数</div>
+          <div className="text-2xl font-semibold">{totals?.total ?? '-'}</div>
+          <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
         </div>
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">

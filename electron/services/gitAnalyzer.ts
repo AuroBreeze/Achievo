@@ -11,6 +11,40 @@ export class GitAnalyzer {
     this.git = simpleGit(repoPath);
   }
 
+  // Get aggregated insertions/deletions since local date (YYYY-MM-DD), including working tree changes
+  async getNumstatSinceDate(date: string): Promise<GitDiffNumstat> {
+    const before = `${date}T00:00:00`;
+    let base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
+    if (!base) {
+      base = (await this.git.raw(['rev-list', '--max-parents=0', 'HEAD'])).split('\n').filter(Boolean).pop() || '';
+      if (!base) return { insertions: 0, deletions: 0 };
+    }
+    // Committed changes since base
+    const committedNum = await this.git.raw(['diff', '--no-color', '-M', '-C', '--textconv', '--numstat', `${base}..HEAD`]);
+    let ins = 0, del = 0;
+    for (const line of committedNum.split('\n')) {
+      if (!line.trim()) continue;
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const a = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
+        const b = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        ins += a; del += b;
+      }
+    }
+    // Plus uncommitted working tree vs HEAD
+    const workingNum = await this.git.raw(['diff', '--no-color', '-M', '-C', '--textconv', '--numstat', 'HEAD']);
+    for (const line of workingNum.split('\n')) {
+      if (!line.trim()) continue;
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const a = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
+        const b = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        ins += a; del += b;
+      }
+    }
+    return { insertions: ins, deletions: del };
+  }
+
   async getHeadCommit(): Promise<string> {
     const log = await this.git.log({ n: 1 });
     return log.latest?.hash || '';

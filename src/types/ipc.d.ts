@@ -17,6 +17,9 @@ declare global {
       summaryGenerate(): Promise<{ date: string; summary: string }>;
       summaryTodayDiff(): Promise<{ date: string; summary: string }>;
       diffToday(): Promise<{ date: string; diff: string }>;
+      statsGetTotals(): Promise<{ insertions: number; deletions: number; total: number }>;
+      statsGetTodayLive(): Promise<{ date: string; insertions: number; deletions: number }>;
+      statsGetTotalsLive(): Promise<{ insertions: number; deletions: number; total: number }>;
 
       // window controls
       windowMinimize(): Promise<void>;
