@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   summaryGenerate: () => ipcRenderer.invoke('summary:generate'),
   trackingAnalyzeOnce: (payload: { repoPath?: string }) => ipcRenderer.invoke('tracking:analyzeOnce', payload),
   summaryTodayDiff: () => ipcRenderer.invoke('summary:todayDiff'),
+  diffToday: () => ipcRenderer.invoke('diff:today'),
 
   // window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),

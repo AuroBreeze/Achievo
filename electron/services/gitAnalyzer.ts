@@ -56,16 +56,27 @@ export class GitAnalyzer {
     return { insertions, deletions };
   }
 
-  // Get unified diff text since the last commit before the given ISO date (YYYY-MM-DD)
+  // Get unified diff text since the last commit before the given local-date (YYYY-MM-DD)
+  // This compares base commit vs current working tree so uncommitted changes are included.
   async getUnifiedDiffSinceDate(date: string): Promise<string> {
-    // Find last commit before the start of the day
-    const before = `${date} 00:00`;
-    const base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
+    // Use ISO-like format to avoid locale parsing issues on different platforms
+    const before = `${date}T00:00:00`;
+    let base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
     if (!base) {
-      // No base before the day; return diff from first commit to HEAD as best effort
-      return this.git.raw(['show', 'HEAD']);
+      // fallback to first commit in repo
+      base = (await this.git.raw(['rev-list', '--max-parents=0', 'HEAD'])).split('\n').filter(Boolean).pop() || '';
+      if (!base) return '';
     }
-    const out = await this.git.raw(['diff', `${base}..HEAD`]);
-    return out;
+    // Build robust diff: committed since base + uncommitted/staged
+    // Add flags to ensure predictable output for UI parsing
+    //  - --no-color: strip ANSI codes
+    //  - -M -C: detect renames/copies
+    //  - --textconv: show textconv for better readability (e.g., for LFS/textconv files)
+    const committed = await this.git.raw(['diff', '--no-color', '-M', '-C', '--textconv', `${base}..HEAD`]);
+    const uncommitted = await this.git.raw(['diff', '--no-color', '-M', '-C', '--textconv', 'HEAD']);
+    // Avoid duplicating if any is empty; add a separator newline when both exist
+    const parts = [committed.trim(), uncommitted.trim()].filter(p => p.length > 0);
+    const combined = parts.join('\n');
+    return combined;
   }
 }

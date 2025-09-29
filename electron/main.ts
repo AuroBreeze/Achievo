@@ -19,6 +19,13 @@ const stats = new StatsService();
 let win: BrowserWindow | null = null;
 
 async function createWindow() {
+  // Resolve preload path (.js in dev/build, sometimes .cjs depending on bundler)
+  const preloadJs = path.join(__dirname, 'preload.js');
+  const preloadCjs = path.join(__dirname, 'preload.cjs');
+  const preloadMjs = path.join(__dirname, 'preload.mjs');
+  // Prefer .cjs (our esbuild target) to avoid accidentally picking up stale .js
+  const preloadPath = [preloadCjs, preloadJs, preloadMjs].find(p => fs.existsSync(p)) || preloadCjs;
+
   win = new BrowserWindow({
     width: 1100,
     height: 800,
@@ -30,7 +37,7 @@ async function createWindow() {
       height: 36,
     },
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: preloadPath,
       nodeIntegration: false,
       contextIsolation: true,
     },
@@ -152,10 +159,30 @@ ipcMain.handle('summary:todayDiff', async () => {
   const repo = cfg.repoPath;
   if (!repo) throw new Error('未设置仓库路径');
   const git = new GitAnalyzer(repo);
-  const today = new Date().toISOString().slice(0, 10);
+  // Use LOCAL date (YYYY-MM-DD)
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
   const diff = await git.getUnifiedDiffSinceDate(today);
   const summary = await summarizeUnifiedDiff(diff);
   return { date: today, summary };
+});
+
+// Return today's unified diff text for in-app visualization
+ipcMain.handle('diff:today', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new GitAnalyzer(repo);
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  const diff = await git.getUnifiedDiffSinceDate(today);
+  return { date: today, diff };
 });
 
 // Window control handlers

@@ -35,6 +35,7 @@ declare global {
       summaryGenerate: () => Promise<any>;
       trackingAnalyzeOnce: (payload: { repoPath?: string }) => Promise<any>;
       summaryTodayDiff: () => Promise<{ date: string; summary: string }>;
+      diffToday: () => Promise<{ date: string; diff: string }>;
 
       // window controls
       windowMinimize: () => Promise<void>;
