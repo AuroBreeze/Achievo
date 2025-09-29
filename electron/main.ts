@@ -10,11 +10,13 @@ import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
 import { GitAnalyzer } from './services/gitAnalyzer';
+import { DB } from './services/db_sqljs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
 const tracker = new TrackerService();
 const stats = new StatsService();
+const db = new DB();
 
 let win: BrowserWindow | null = null;
 
@@ -166,13 +168,34 @@ ipcMain.handle('summary:todayDiff', async () => {
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
   const diff = await git.getUnifiedDiffSinceDate(today);
-  const summary = await summarizeUnifiedDiff(diff);
-  // Persist the AI summary to history (score set to 0 for now)
+  const jsonText = await summarizeUnifiedDiff(diff);
+  let aiScore = 0;
+  let markdown = '';
   try {
-    const record = { timestamp: Date.now(), score: 0, summary };
+    const obj = JSON.parse(jsonText);
+    aiScore = Math.max(0, Math.min(100, Number(obj?.score) || 0));
+    markdown = String(obj?.markdown || '');
+  } catch {
+    // 回退：若不是 JSON，则当作纯文本 markdown 处理
+    markdown = jsonText || '';
+  }
+
+  // 确保今日有记录并保存 markdown 与分数
+  try {
+    const existed = await db.getDay(today);
+    if (!existed) await db.upsertDayAccumulate(today, 0, 0);
+    if (markdown) await db.setDaySummary(today, markdown);
+    await db.setDayBaseScore(today, aiScore);
+    await db.updateAggregatesForDate(today);
+  } catch {}
+
+  // 写入历史
+  try {
+    const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
   } catch {}
-  return { date: today, summary };
+
+  return { date: today, summary: markdown };
 });
 
 // Return today's unified diff text for in-app visualization

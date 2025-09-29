@@ -146,6 +146,18 @@ export class DB {
     await this.persist();
   }
 
+  async setDayBaseScore(date: string, baseScore: number) {
+    await this.ready;
+    const now = Date.now();
+    const y = this.getYesterday(date);
+    const yesterday = y ? await this.getDay(y) : null;
+    const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
+    this.db.run(`UPDATE days SET baseScore=?, trend=?, updatedAt=? WHERE date=?`, [
+      Math.max(0, Math.min(100, Math.round(baseScore))), trend, now, date
+    ]);
+    await this.persist();
+  }
+
   async updateAggregatesForDate(date: string) {
     await this.ready;
     const now = Date.now();
