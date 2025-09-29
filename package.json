@@ -1,0 +1,58 @@
+{
+  "name": "achievo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Achievo - 代码进步追踪器 (Electron + React + Tailwind + TypeScript)",
+  "main": "dist-electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n vite,esb,app \"vite --port 5173\" \"npm:dev:electron\" \"wait-on dist-electron/main.cjs tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "dev:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --outdir=dist-electron --external:electron --format=cjs --out-extension:.js=.cjs --watch",
+    "build": "rimraf dist dist-electron && vite build && esbuild electron/main.ts electron/preload.ts --bundle --platform=node --outdir=dist-electron --external:electron --format=cjs --out-extension:.js=.cjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.windsurf.achievo",
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main.cjs"
+    }
+  },
+  "dependencies": {
+    "chart.js": "^4.4.4",
+    "dotenv": "^16.4.5",
+    "sql.js": "^1.10.2",
+    "openai": "^4.56.0",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.3.1",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "@types/node": "^22.7.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
+    "electron": "^31.4.0",
+    "electron-builder": "^24.13.3",
+    "esbuild": "^0.23.1",
+    "eslint": "^9.12.0",
+    "postcss": "^8.4.47",
+    "wait-on": "^8.0.1",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^3.4.14",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}
