@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
+import rehypeSlug from 'rehype-slug';
+import rehypeAutolinkHeadings from 'rehype-autolink-headings';
+import rehypeHighlight from 'rehype-highlight';
 
 const Dashboard: React.FC = () => {
   const [error, setError] = useState<string>('');
@@ -111,7 +115,14 @@ const Dashboard: React.FC = () => {
       <section className="lg:col-span-2 bg-slate-800 rounded p-4">
         <h3 className="font-medium">AI 总结</h3>
         <div className="prose prose-invert max-w-none mt-2 text-slate-200">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            rehypePlugins={[
+              rehypeSlug,
+              [rehypeAutolinkHeadings, { behavior: 'wrap' }],
+              [rehypeHighlight, { ignoreMissing: true }],
+            ]}
+          >
             {todayText || today?.summary || '—'}
           </ReactMarkdown>
         </div>

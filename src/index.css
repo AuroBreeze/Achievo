@@ -1,3 +1,5 @@
+@import 'highlight.js/styles/github-dark-dimmed.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -11,3 +13,40 @@ button { transition: background-color 0.2s ease; }
 .no-drag { -webkit-app-region: no-drag; }
 
 html, body, #root { height: 100%; }
+
+/* Prose tweaks for better Markdown readability in dark mode */
+.prose.prose-invert {
+  --tw-prose-body: theme(colors.slate.200);
+  --tw-prose-headings: theme(colors.slate.100);
+  --tw-prose-links: theme(colors.indigo.300);
+  --tw-prose-links-hover: theme(colors.indigo.200);
+  --tw-prose-bold: theme(colors.slate.100);
+  --tw-prose-counters: theme(colors.slate.400);
+  --tw-prose-bullets: theme(colors.slate.500);
+  --tw-prose-hr: theme(colors.slate.700);
+  --tw-prose-quotes: theme(colors.slate.100);
+  --tw-prose-quote-borders: theme(colors.slate.700);
+  --tw-prose-captions: theme(colors.slate.400);
+  --tw-prose-code: theme(colors.sky.300);
+  --tw-prose-pre-code: theme(colors.slate.200);
+  --tw-prose-pre-bg: theme(colors.slate.900);
+  --tw-prose-th-borders: theme(colors.slate.700);
+  --tw-prose-td-borders: theme(colors.slate.800);
+}
+
+.prose h1, .prose h2, .prose h3 {
+  scroll-margin-top: 80px;
+}
+
+.prose pre {
+  border: 1px solid rgb(51 65 85 / 1); /* slate-700 */
+  border-radius: 0.5rem;
+}
+
+.prose code::before, .prose code::after { content: none; }
+
+.prose table {
+  display: block;
+  overflow: auto;
+  border-radius: 0.375rem;
+}
