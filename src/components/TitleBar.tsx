@@ -21,7 +21,7 @@ function TitleBar() {
 
   return (
     <div className="titlebar flex items-center justify-between select-none bg-slate-900 border-b border-slate-800" style={{ height: 36, paddingInline: 8 }}>
-      <div className="text-xs text-slate-400">Achievo</div>
+      <div className="text-xs text-slate-400" />
       <div className="flex items-center gap-1 no-drag">
         <button
           title="最小化"

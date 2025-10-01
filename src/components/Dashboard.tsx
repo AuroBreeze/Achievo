@@ -85,6 +85,15 @@ const StatValue: React.FC<{ value: React.ReactNode }> = ({ value }) => {
   return <div className="text-2xl font-semibold">{value}</div>;
 };
 
+// Lazy mount helpers
+const rIC = (cb: () => void) => (typeof (window as any).requestIdleCallback === 'function' ? (window as any).requestIdleCallback(cb) : setTimeout(cb, 50));
+const LazyIcon: React.FC<{ name: Parameters<typeof StatIcon>[0]['name'] }> = ({ name }) => {
+  const [ready, setReady] = React.useState(false);
+  React.useEffect(() => { const id = rIC(() => setReady(true)); return () => { if (typeof id === 'number') clearTimeout(id); }; }, []);
+  if (!ready) return null;
+  return <StatIcon name={name} />;
+};
+
 // Reusable stat card component
 const StatCard: React.FC<{
   title: string;
@@ -97,7 +106,7 @@ const StatCard: React.FC<{
 }> = ({ title, icon, value, valueClassName, subtitle, titleAttr, children }) => (
   <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={typeof titleAttr === 'string' ? titleAttr : undefined}>
     <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2">
-      {icon && <StatIcon name={icon} />}
+      {icon && <LazyIcon name={icon} />}
       {title}
     </div>
     {children ? (
@@ -452,9 +461,12 @@ const Dashboard: React.FC = () => {
           if (typeof metaTokens === 'number') metaParts.push(`tokens: ${metaTokens}`);
           if (typeof metaDur === 'number') metaParts.push(`用时: ${Math.max(1, Math.round(Number(metaDur)/1000))}s`);
           const metaLine = metaParts.join(' · ');
+          // Lazy show meta until browser idle to avoid blocking render after route switch
+          const [metaReady, setMetaReady] = React.useState(false);
+          React.useEffect(() => { const id = rIC(() => setMetaReady(true)); return () => { if (typeof id === 'number') clearTimeout(id); }; }, [mdSource, metaLast, metaChunks, metaModel, metaProv, metaTokens, metaDur]);
           return (
             <div className="prose prose-invert max-w-none mt-2 text-slate-200">
-              <div className="text-xs text-slate-400 mb-2">{metaLine}</div>
+              {metaReady && <div className="text-xs text-slate-400 mb-2">{metaLine}</div>}
               {mdSource.trim() ? (
                 <ReactMarkdown
                   key={`md-${mdSource.length}`}
