@@ -103,7 +103,7 @@ export class DB {
         date TEXT PRIMARY KEY,
         insertions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
-        baseScore INTEGER NOT NULL DEFAULT 0,
+        baseScore INTEGER NOT NULL DEFAULT 100,
         trend INTEGER NOT NULL DEFAULT 0,
         summary TEXT,
         aiScore INTEGER,
@@ -174,8 +174,10 @@ export class DB {
     // Cap increment to 25% of previous base
     const base0 = Math.max(100, prevBase);
     const incCapped = Math.min(Math.max(0, dailyInc), base0 * 0.25);
-    const next = base0 + incCapped;
-    return Math.round(next);
+    // Avoid rounding to 0 when there is a tiny positive increment
+    const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
+    const next = base0 + incApplied;
+    return next;
   }
 
   async getDay(date: string): Promise<DayRow | null> {
@@ -257,10 +259,15 @@ export class DB {
     const locAbs = Math.max(0, Math.min(100, (typeof loc === 'number' ? loc : 0)));
     const incLocal = Math.max(0, Math.min(40, locAbs * 0.4));
     const dailyInc = incLines + aiPart + incLocal;
-    // Cap increment to 25% of previous base
-    const incCapped = Math.min(Math.max(0, dailyInc), prevBase * 0.25);
-    const nextBase = Math.round(prevBase + incCapped);
-    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : 0;
+    // Preserve earlier increments but ensure the total daily increase does NOT exceed 25% of yesterday's base
+    const currentBase = Math.max(prevBase, Math.max(100, row.baseScore || 0));
+    const maxDailyAllowance = prevBase * 0.25;
+    const alreadyGained = Math.max(0, currentBase - prevBase);
+    const remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
+    const incCapped = Math.min(Math.max(0, dailyInc), remainingAllowance);
+    const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
+    const nextBase = currentBase + incApplied;
+    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : incApplied;
 
     this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);
     await this.persist();

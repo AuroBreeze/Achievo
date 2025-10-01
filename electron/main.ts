@@ -155,11 +155,37 @@ ipcMain.handle('tracking:status', async () => {
 
 // Stats & Summary (SQLite-backed)
 ipcMain.handle('stats:getToday', async () => {
-  return stats.getToday();
+  // Read from shared DB instance to reflect latest writes
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  const row = await db.getDay(today);
+  if (row) return row;
+  return {
+    date: today,
+    insertions: 0,
+    deletions: 0,
+    baseScore: 100,
+    trend: 0,
+    summary: null,
+    aiScore: null,
+    localScore: null,
+    progressPercent: null,
+    aiModel: null,
+    aiProvider: null,
+    aiTokens: null,
+    aiDurationMs: null,
+    chunksCount: null,
+    lastGenAt: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
 });
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
-  return stats.getRange(payload.startDate, payload.endDate);
+  return db.getDaysRange(payload.startDate, payload.endDate);
 });
 
 ipcMain.handle('summary:generate', async () => {
@@ -224,8 +250,9 @@ ipcMain.handle('summary:todayDiff', async () => {
   let progressPercent = 0;
   if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
   else progressPercent = localScore > 0 ? 100 : 0;
-  // clamp
+  // Round and clamp to a maximum of 25%
   progressPercent = Math.round(progressPercent);
+  if (progressPercent > 25) progressPercent = 25;
 
   // Save counts, ensure row, save markdown and AI base score
   try {
