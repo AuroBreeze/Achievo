@@ -190,7 +190,7 @@ function replaceJsonFencesWithMarkdown(md: string): string {
 // Chunked summarization to avoid context overflow; returns JSON string like {"score_ai": number, "markdown": string}
 export async function summarizeUnifiedDiffChunked(
   diffText: string,
-  ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures }
+  ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures; onProgress?: (done: number, total: number) => void }
 ): Promise<{ text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number }> {
   const trimmed = (diffText || '').trim();
   if (!trimmed) return { text: JSON.stringify({ score_ai: 0, markdown: '今日无代码改动' }), model: undefined, provider: undefined, tokens: 0, durationMs: 0, chunksCount: 0 };
@@ -242,6 +242,8 @@ export async function summarizeUnifiedDiffChunked(
       // if still not parseable, treat as markdown text
       partials.push({ score_ai: 0, markdown: txt });
     }
+    // progress callback per chunk (1-based done count)
+    try { ctx?.onProgress?.(idx + 1, chunks.length); } catch {}
   }
 
   // Aggregate (sanitize any leftover JSON-looking markdown)

@@ -27,6 +27,11 @@ declare global {
       windowIsMaximized(): Promise<boolean>;
       windowClose(): Promise<void>;
       onWindowMaximizeChanged(callback: (isMax: boolean) => void): () => void;
+
+      // background summary job
+      startSummaryJob(): Promise<{ ok: boolean; error?: string; job: { id: string; type: 'today-summary'; status: 'idle' | 'running' | 'done' | 'error'; progress: number; startedAt?: number; finishedAt?: number; error?: string; result?: { date: string; summary: string; scoreAi: number; scoreLocal: number; progressPercent: number; featuresSummary: string } } }>;
+      getSummaryJobStatus(): Promise<{ id: string; type: 'today-summary'; status: 'idle' | 'running' | 'done' | 'error'; progress: number; startedAt?: number; finishedAt?: number; error?: string; result?: { date: string; summary: string; scoreAi: number; scoreLocal: number; progressPercent: number; featuresSummary: string } }>;
+      onSummaryJobProgress(callback: (payload: { id: string; progress: number; status: 'idle' | 'running' | 'done' | 'error' }) => void): () => void;
     };
   }
 }

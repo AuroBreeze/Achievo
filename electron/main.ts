@@ -21,6 +21,155 @@ const db = new DB();
 
 let win: BrowserWindow | null = null;
 
+// --- Simple background job state for today's summary ---
+type JobStatus = {
+  id: string;
+  type: 'today-summary';
+  status: 'idle' | 'running' | 'done' | 'error';
+  progress: number; // 0..100
+  startedAt?: number;
+  finishedAt?: number;
+  error?: string;
+  result?: { date: string; summary: string; scoreAi: number; scoreLocal: number; progressPercent: number; featuresSummary: string };
+};
+let summaryJob: JobStatus = { id: 'today', type: 'today-summary', status: 'idle', progress: 0 };
+
+function emitSummaryProgress(p: number) {
+  summaryJob.progress = Math.max(0, Math.min(100, Math.round(p)));
+  if (win) {
+    try { win.webContents.send('summary:job:progress', { id: summaryJob.id, progress: summaryJob.progress, status: summaryJob.status }); } catch {}
+  }
+}
+
+async function runTodaySummaryJob(): Promise<JobStatus['result']> {
+  // This reuses the logic of summary:todayDiff handler below (kept in sync)
+  summaryJob.status = 'running';
+  summaryJob.startedAt = Date.now();
+  emitSummaryProgress(1);
+
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new GitAnalyzer(repo);
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  // Preparation done
+  emitSummaryProgress(10);
+
+  const diff = await git.getUnifiedDiffSinceDate(today);
+  const feats = extractDiffFeatures(diff);
+  const localScore = scoreFromFeatures(feats);
+  // Features & local score ready
+  emitSummaryProgress(20);
+
+  let prevBase = 0;
+  try {
+    const y = db.getYesterday(today);
+    if (y) {
+      const prev = await db.getDay(y);
+      prevBase = prev?.baseScore || 0;
+    }
+  } catch {}
+
+  const ns = await git.getNumstatSinceDate(today);
+  let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
+  try {
+    summaryRes = await summarizeUnifiedDiffChunked(diff, {
+      insertions: ns.insertions,
+      deletions: ns.deletions,
+      prevBaseScore: prevBase,
+      localScore,
+      features: feats,
+      onProgress: (done, total) => {
+        // Map chunk progress to 20%..95%
+        const base = 20; // after preparation
+        const span = 75; // 20 -> 95
+        const pct = base + Math.floor((span * done) / Math.max(1, total));
+        emitSummaryProgress(Math.min(95, Math.max(20, pct)));
+      },
+    });
+  } catch {
+    summaryRes = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+  }
+  // AI response received, moving to persistence
+  emitSummaryProgress(96);
+
+  let aiScore = 0;
+  let markdown = '';
+  try {
+    const obj = JSON.parse(summaryRes.text);
+    aiScore = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
+    markdown = String(obj?.markdown || '');
+  } catch {
+    markdown = summaryRes.text || '';
+  }
+
+  let progressPercent = 0;
+  if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
+  else progressPercent = localScore > 0 ? 100 : 0;
+  progressPercent = Math.round(progressPercent);
+  if (progressPercent > 25) progressPercent = 25;
+
+  try { await db.setDayCounts(today, ns.insertions, ns.deletions); } catch {}
+  try {
+    const existed = await db.getDay(today);
+    if (!existed) await db.upsertDayAccumulate(today, 0, 0);
+    if (markdown) await db.setDaySummary(today, markdown);
+    await db.updateAggregatesForDate(today);
+  } catch {}
+  try {
+    await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
+    const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
+      ? summaryRes.tokens
+      : Math.max(1, Math.round((markdown?.length || 0) / 4));
+    await db.setDayAiMeta(today, {
+      aiModel: summaryRes.model || undefined,
+      aiProvider: summaryRes.provider || undefined,
+      aiTokens: estTokens,
+      aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
+      chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
+      lastGenAt: Date.now(),
+    });
+    const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
+    await storage.append(record);
+  } catch {}
+
+  const featuresSummary = `代码文件:${feats.codeFiles} 测试:${feats.testFiles} 文档:${feats.docFiles} 配置:${feats.configFiles} Hunk:${feats.hunks} 重命名:${feats.renameOrMove} 语言:${Object.keys(feats.languages||{}).join('+')||'-'} 依赖变更:${feats.dependencyChanges?'是':'否'} 安全敏感:${feats.hasSecuritySensitive?'是':'否'}`;
+  emitSummaryProgress(100);
+  return { date: today, summary: markdown, scoreAi: aiScore, scoreLocal: localScore, progressPercent, featuresSummary };
+}
+
+// IPC: background job controls
+ipcMain.handle('summary:job:start', async () => {
+  if (summaryJob.status === 'running') {
+    return { ok: true, job: summaryJob };
+  }
+  summaryJob = { id: 'today', type: 'today-summary', status: 'running', progress: 0, startedAt: Date.now() };
+  // Fire-and-forget: don't block the IPC reply
+  (async () => {
+    try {
+      const res = await runTodaySummaryJob();
+      summaryJob.result = res;
+      summaryJob.status = 'done';
+      summaryJob.finishedAt = Date.now();
+      emitSummaryProgress(100);
+    } catch (e: any) {
+      summaryJob.status = 'error';
+      summaryJob.error = e?.message || String(e);
+      summaryJob.finishedAt = Date.now();
+      emitSummaryProgress(summaryJob.progress || 0);
+    }
+  })();
+  return { ok: true, job: summaryJob };
+});
+
+ipcMain.handle('summary:job:status', async () => {
+  return summaryJob;
+});
+
 async function createWindow() {
   // Resolve preload path (.js in dev/build, sometimes .cjs depending on bundler)
   const preloadJs = path.join(__dirname, 'preload.js');
