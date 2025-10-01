@@ -294,6 +294,8 @@ ipcMain.handle('stats:getTodayLive', async () => {
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
   const ns = await git.getNumstatSinceDate(today);
+  // Persist to DB for real-time baseScore/trend
+  try { await db.setDayCounts(today, ns.insertions, ns.deletions); } catch {}
   return { date: today, insertions: ns.insertions, deletions: ns.deletions };
 });
 

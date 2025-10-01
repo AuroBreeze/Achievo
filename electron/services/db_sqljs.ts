@@ -236,7 +236,27 @@ export class DB {
     const ai = (metrics.aiScore ?? row.aiScore ?? null);
     const loc = (metrics.localScore ?? row.localScore ?? null);
     const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
-    this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, prog, now, date]);
+
+    // Recompute baseScore with reduced reliance on line counts and stronger link to AI/local scores
+    // Hybrid daily increment components:
+    // - Lines component (lower weight): ins*0.8 + del*0.4 with diminishing returns, capped ~60
+    // - AI component: up to 30 points (aiScore 0..100 -> 0..30)
+    // - Local component: relative improvement vs prevBase, up to 40 points
+    const yKey = this.getYesterday(date);
+    const y = yKey ? await this.getDay(yKey) : null;
+    const prevBase = Math.max(100, y?.baseScore || 100);
+    const ins = Math.max(0, row.insertions || 0);
+    const del = Math.max(0, row.deletions || 0);
+    const rawLines = ins * 0.8 + del * 0.4;
+    const incLines = 60 * (1 - Math.exp(-rawLines / 300));
+    const aiPart = Math.max(0, Math.min(30, (typeof ai === 'number' ? ai : 0) * 0.3));
+    const localRel = prevBase > 0 ? (((typeof loc === 'number' ? loc : 0) - prevBase) / prevBase) : 0;
+    const incLocal = Math.max(0, Math.min(40, localRel * 40 * 1));
+    const dailyInc = incLines + aiPart + incLocal;
+    const nextBase = Math.round(prevBase + Math.max(0, dailyInc));
+    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : 0;
+
+    this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);
     await this.persist();
   }
 

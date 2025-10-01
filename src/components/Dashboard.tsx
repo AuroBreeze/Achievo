@@ -345,6 +345,15 @@ const Dashboard: React.FC = () => {
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="score" /> 基础分</div>
           <StatValue value={today?.baseScore ?? '-'} />
+          {(() => {
+            const delta = (typeof (today as any)?.trend === 'number') ? (today as any).trend : trendDerived;
+            if (typeof delta === 'number') {
+              const txt = `${delta >= 0 ? '+' : ''}${formatCompact(delta)}`;
+              const cls = delta >= 0 ? 'text-green-400' : 'text-red-400';
+              return <div className="text-xs opacity-70 mt-1">今日 <span className={cls}>{txt}</span></div>;
+            }
+            return <div className="text-xs opacity-70 mt-1">今日 0</div>;
+          })()}
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="trend" /> 趋势(较昨日)</div>
