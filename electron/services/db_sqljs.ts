@@ -181,10 +181,10 @@ export class DB {
     const raw = Math.max(0, insertions) * wAdded + Math.max(0, deletions) * wRemoved;
     const alpha = 220;
     const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
-    // Cap increment to 25% of previous base
     const base0 = Math.max(100, prevBase);
-    const incCapped = Math.min(Math.max(0, dailyInc), base0 * 0.25);
-    // Avoid rounding to 0 when there is a tiny positive increment
+    // Cap the daily increase to 50% of previous base
+    const incCapped = Math.min(Math.max(0, dailyInc), base0 * 0.5);
+    // 避免极小正增量被四舍五入为 0
     const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
     const next = base0 + incApplied;
     return next;
@@ -253,10 +253,10 @@ export class DB {
     const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
 
     // Recompute baseScore with reduced reliance on line counts and stronger link to AI/local scores
-    // Hybrid daily increment components:
-    // - Lines component (lower weight): ins*0.8 + del*0.4 with diminishing returns, capped ~60
+    // Hybrid daily increment components（取消按昨日基准的 25% 封顶）：
+    // - Lines component (lower weight): ins*0.8 + del*0.4 with diminishing returns, ~0..60
     // - AI component: up to 30 points (aiScore 0..100 -> 0..30)
-    // - Local component: relative improvement vs prevBase, up to 40 points
+    // - Local component: absolute contribution up to 40 points
     const yKey = this.getYesterday(date);
     const y = yKey ? await this.getDay(yKey) : null;
     const prevBase = Math.max(100, y?.baseScore || 100);
@@ -269,9 +269,9 @@ export class DB {
     const locAbs = Math.max(0, Math.min(100, (typeof loc === 'number' ? loc : 0)));
     const incLocal = Math.max(0, Math.min(40, locAbs * 0.4));
     const dailyInc = incLines + aiPart + incLocal;
-    // Preserve earlier increments but ensure the total daily increase does NOT exceed 25% of yesterday's base
     const currentBase = Math.max(prevBase, Math.max(100, row.baseScore || 0));
-    const maxDailyAllowance = prevBase * 0.25;
+    // Limit total daily gain to 50% of yesterday's base, accounting for any gain already applied today
+    const maxDailyAllowance = prevBase * 0.5;
     const alreadyGained = Math.max(0, currentBase - prevBase);
     const remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
     const incCapped = Math.min(Math.max(0, dailyInc), remainingAllowance);
