@@ -3,7 +3,8 @@ import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { analyzeDiff } from './services/codeAnalyzer';
-import { scoreProgress } from './services/progressScorer';
+import { scoreProgress, scoreFromFeatures } from './services/progressScorer';
+import { extractDiffFeatures } from './services/diffFeatures';
 import { summarizeWithAI, summarizeUnifiedDiff } from './services/aiSummarizer';
 import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
@@ -167,41 +168,62 @@ ipcMain.handle('summary:todayDiff', async () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
+  // Build unified diff and semantic features first
   const diff = await git.getUnifiedDiffSinceDate(today);
-  const jsonText = await summarizeUnifiedDiff(diff);
+  const feats = extractDiffFeatures(diff);
+  // Local semantic score
+  const localScore = scoreFromFeatures(feats);
+  // Previous baseline
+  let prevBase = 0;
+  try {
+    const y = db.getYesterday(today);
+    if (y) {
+      const prev = await db.getDay(y);
+      prevBase = prev?.baseScore || 0;
+    }
+  } catch {}
+
+  // Summarize with AI and pass context metrics
+  // Also compute git numstat for persistence below
+  const ns = await git.getNumstatSinceDate(today);
+  const jsonText = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
   let aiScore = 0;
   let markdown = '';
   try {
     const obj = JSON.parse(jsonText);
-    aiScore = Math.max(0, Math.min(100, Number(obj?.score) || 0));
+    aiScore = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
     markdown = String(obj?.markdown || '');
   } catch {
     // 回退：若不是 JSON，则当作纯文本 markdown 处理
     markdown = jsonText || '';
   }
 
-  // 计算并同步保存“今天以来”的插入/删除
+  // Compute progress percent vs yesterday baseline
+  let progressPercent = 0;
+  if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
+  else progressPercent = localScore > 0 ? 100 : 0;
+  // clamp
+  progressPercent = Math.round(progressPercent);
+
+  // Save counts, ensure row, save markdown and AI base score
   try {
-    const ns = await git.getNumstatSinceDate(today);
     await db.setDayCounts(today, ns.insertions, ns.deletions);
   } catch {}
-
-  // 确保今日有记录并保存 markdown 与分数
   try {
     const existed = await db.getDay(today);
     if (!existed) await db.upsertDayAccumulate(today, 0, 0);
     if (markdown) await db.setDaySummary(today, markdown);
-    await db.setDayBaseScore(today, aiScore);
+    // Do NOT overwrite cumulative baseScore with AI score; keep baseScore monotonic
     await db.updateAggregatesForDate(today);
   } catch {}
 
-  // 写入历史
+  // Append to history with AI score (for charting continuity)
   try {
     const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
   } catch {}
 
-  return { date: today, summary: markdown };
+  return { date: today, summary: markdown, scoreAi: aiScore, scoreLocal: localScore, progressPercent };
 });
 
 // Return today's unified diff text for in-app visualization

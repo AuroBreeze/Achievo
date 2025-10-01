@@ -5,6 +5,18 @@ import remarkBreaks from 'remark-breaks';
 import rehypeSlug from 'rehype-slug';
 import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypeHighlight from 'rehype-highlight';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
 const Dashboard: React.FC = () => {
   const [error, setError] = useState<string>('');
@@ -16,11 +28,17 @@ const Dashboard: React.FC = () => {
   const [diffText, setDiffText] = useState('');
   const [totals, setTotals] = useState<{ insertions: number; deletions: number; total: number } | null>(null);
   const [todayLive, setTodayLive] = useState<{ date: string; insertions: number; deletions: number } | null>(null);
+  const [history, setHistory] = useState<{ timestamp: number; score: number }[]>([]);
+  const [scoreLocal, setScoreLocal] = useState<number | null>(null);
+  const [scoreAi, setScoreAi] = useState<number | null>(null);
+  const [progressPercent, setProgressPercent] = useState<number | null>(null);
 
   const loadToday = async () => {
     if (!window.api) return;
     const t = await window.api.statsGetToday();
     setToday(t);
+    // initialize AI score from today's baseScore (computed/saved on last summary)
+    if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore);
   };
 
   const loadTotals = async () => {
@@ -60,6 +78,8 @@ const Dashboard: React.FC = () => {
     loadToday();
     loadTotals();
     loadTodayLive();
+    // load history for chart
+    window.api?.getHistory?.().then((items: any[]) => setHistory((items||[]).map(i => ({ timestamp: i.timestamp, score: i.score }))));
     const id = setInterval(() => { loadToday(); loadTotals(); loadTodayLive(); }, 10000);
     return () => clearInterval(id);
   }, []);
@@ -72,6 +92,9 @@ const Dashboard: React.FC = () => {
       await window.api.trackingAnalyzeOnce({});
       const res = await window.api.summaryTodayDiff();
       setTodayText(res.summary || '（无内容）');
+      if (typeof res.scoreLocal === 'number') setScoreLocal(res.scoreLocal);
+      if (typeof res.scoreAi === 'number') setScoreAi(res.scoreAi);
+      if (typeof res.progressPercent === 'number') setProgressPercent(res.progressPercent);
       await loadToday();
       await loadTotals();
       await loadTodayLive();
@@ -84,27 +107,41 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-slate-800 rounded p-4">
+      <section className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
           <div className="text-sm opacity-75">今日新增</div>
           <div className="text-2xl font-semibold">{(todayLive?.insertions ?? today?.insertions) ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
           <div className="text-sm opacity-75">今日删除</div>
           <div className="text-2xl font-semibold">{(todayLive?.deletions ?? today?.deletions) ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
           <div className="text-sm opacity-75">基础分</div>
           <div className="text-2xl font-semibold">{today?.baseScore ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
           <div className="text-sm opacity-75">趋势(较昨日)</div>
           <div className={`text-2xl font-semibold ${((today?.trend||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{today?.trend ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 md:col-span-1">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
           <div className="text-sm opacity-75">总改动数</div>
           <div className="text-2xl font-semibold">{totals?.total ?? '-'}</div>
           <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <div className="text-sm opacity-75">本地进步分</div>
+          <div className="text-2xl font-semibold">{scoreLocal ?? '—'}</div>
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <div className="text-sm opacity-75">AI 进步分</div>
+          <div className="text-2xl font-semibold">{scoreAi ?? '—'}</div>
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <div className="text-sm opacity-75">进步百分比</div>
+          <div className={`text-2xl font-semibold ${((progressPercent||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{
+            (progressPercent !== null && progressPercent !== undefined) ? `${progressPercent}%` : '—'
+          }</div>
         </div>
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">
@@ -112,7 +149,7 @@ const Dashboard: React.FC = () => {
         <button onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }} className="px-4 py-2 rounded bg-slate-700">{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
       </section>
-      <section className="lg:col-span-2 bg-slate-800 rounded p-4">
+      <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
         <h3 className="font-medium">AI 总结</h3>
         <div className="prose prose-invert max-w-none mt-2 text-slate-200">
           <ReactMarkdown
@@ -126,6 +163,17 @@ const Dashboard: React.FC = () => {
             {todayText || today?.summary || '—'}
           </ReactMarkdown>
         </div>
+      </section>
+      {/* History chart inside dashboard */}
+      <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
+        <h3 className="font-medium mb-2">历史分数</h3>
+        <Line
+          data={{
+            labels: history.map(d => new Date(d.timestamp).toLocaleString()),
+            datasets: [{ label: '进步分数', data: history.map(d => d.score), borderColor: '#4f46e5' }],
+          }}
+          options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
+        />
       </section>
       {diffOpen && (
         <section className="lg:col-span-2 bg-slate-900 rounded border border-slate-800 overflow-hidden">
@@ -154,6 +202,6 @@ const Dashboard: React.FC = () => {
       )}
     </div>
   );
-};
+}
 
 export default Dashboard;

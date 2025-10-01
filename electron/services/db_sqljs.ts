@@ -10,6 +10,9 @@ export type DayRow = {
   baseScore: number; // 基础分
   trend: number; // 与昨天的差值
   summary?: string | null;
+  aiScore?: number | null;
+  localScore?: number | null;
+  progressPercent?: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -30,10 +33,11 @@ export class DB {
     const now = Date.now();
     const ins = Math.max(0, Math.round(insertions));
     const del = Math.max(0, Math.round(deletions));
-    const baseScore = this.computeBaseScore(ins, del);
     const y = this.getYesterday(date);
     const yesterday = y ? await this.getDay(y) : null;
-    const trend = yesterday ? baseScore - yesterday.baseScore : 0;
+    const prevBase = Math.max(100, yesterday?.baseScore || 100);
+    const baseScore = this.computeCumulativeBase(prevBase, ins, del);
+    const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
     const exists = await this.getDay(date);
     if (!exists) {
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -80,6 +84,9 @@ export class DB {
         baseScore INTEGER NOT NULL DEFAULT 0,
         trend INTEGER NOT NULL DEFAULT 0,
         summary TEXT,
+        aiScore INTEGER,
+        localScore INTEGER,
+        progressPercent INTEGER,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -111,6 +118,10 @@ export class DB {
         updatedAt INTEGER NOT NULL
       );
     `);
+    // Defensive add columns for existing DBs (ignore if already exists)
+    try { this.db.run(`ALTER TABLE days ADD COLUMN aiScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN localScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN progressPercent INTEGER`); } catch {}
     this.persist();
   }
 
@@ -119,10 +130,15 @@ export class DB {
     await fs.writeFile(this.filePath, Buffer.from(data));
   }
 
-  private computeBaseScore(insertions: number, deletions: number): number {
-    const raw = insertions * 2 + deletions * 1;
-    const normalized = Math.min(100, Math.round((raw / Math.max(1, insertions + deletions)) * 50 + Math.min(50, insertions)));
-    return Math.max(0, normalized);
+  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number): number {
+    // Daily increment with diminishing returns
+    const wAdded = 1.6;
+    const wRemoved = 0.8;
+    const raw = Math.max(0, insertions) * wAdded + Math.max(0, deletions) * wRemoved;
+    const alpha = 220;
+    const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
+    const next = Math.max(100, prevBase) + Math.max(0, dailyInc);
+    return Math.round(next);
   }
 
   async getDay(date: string): Promise<DayRow | null> {
@@ -147,10 +163,11 @@ export class DB {
     if (!existing) {
       const ins = Math.max(0, deltaIns);
       const del = Math.max(0, deltaDel);
-      const baseScore = this.computeBaseScore(ins, del);
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
-      const trend = yesterday ? baseScore - yesterday.baseScore : 0;
+      const prevBase = Math.max(100, yesterday?.baseScore || 100);
+      const baseScore = this.computeCumulativeBase(prevBase, ins, del);
+      const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [date, ins, del, baseScore, trend, null, now, now]);
       await this.persist();
@@ -158,10 +175,11 @@ export class DB {
     } else {
       const ins = Math.max(0, existing.insertions + deltaIns);
       const del = Math.max(0, existing.deletions + deltaDel);
-      const baseScore = this.computeBaseScore(ins, del);
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
-      const trend = yesterday ? baseScore - yesterday.baseScore : 0;
+      const prevBase = Math.max(100, yesterday?.baseScore || 100);
+      const baseScore = this.computeCumulativeBase(prevBase, ins, del);
+      const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
       this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
         [ins, del, baseScore, trend, now, date]);
       await this.persist();
@@ -173,6 +191,18 @@ export class DB {
     await this.ready;
     const now = Date.now();
     this.db.run(`UPDATE days SET summary=?, updatedAt=? WHERE date=?`, [summary, now, date]);
+    await this.persist();
+  }
+
+  async setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; progressPercent?: number | null }) {
+    await this.ready;
+    const now = Date.now();
+    const row = await this.getDay(date);
+    if (!row) return; // ensure row exists before setting
+    const ai = (metrics.aiScore ?? row.aiScore ?? null);
+    const loc = (metrics.localScore ?? row.localScore ?? null);
+    const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
+    this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, prog, now, date]);
     await this.persist();
   }
 
