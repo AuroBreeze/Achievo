@@ -104,7 +104,23 @@ ipcMain.handle('analyze:diff', async (_evt, payload: { before: string; after: st
 });
 
 ipcMain.handle('history:get', async () => {
-  return storage.getAll();
+  const items = await storage.getAll();
+  // Group by local date (YYYY-MM-DD), pick the latest entry of each day
+  const byDay = new Map<string, typeof items[number]>();
+  for (const it of items) {
+    const d = new Date(it.timestamp);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const key = `${yyyy}-${mm}-${dd}`;
+    const prev = byDay.get(key);
+    if (!prev || it.timestamp > prev.timestamp) byDay.set(key, it);
+  }
+  // Sort by day ascending and return array
+  const aggregated = Array.from(byDay.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, it]) => it);
+  return aggregated;
 });
 
 ipcMain.handle('config:get', async () => {
