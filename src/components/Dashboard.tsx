@@ -175,6 +175,7 @@ const Dashboard: React.FC = () => {
   const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [aiTokens, setAiTokens] = useState<number | null>(null);
   const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
+  const [jobProgress, setJobProgress] = useState<number>(0);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -286,6 +287,64 @@ const Dashboard: React.FC = () => {
     return () => clearInterval(id);
   }, [loadDailyRange]);
 
+  // Subscribe background job progress and restore status on mount/route return
+  React.useEffect(() => {
+    if (!window.api) return;
+    const off = window.api.onSummaryJobProgress(async ({ status, progress }) => {
+      setTodayBusy(status === 'running');
+      setJobProgress(typeof progress === 'number' ? progress : 0);
+      if (status === 'done') {
+        try {
+          const job: any = await window.api.getSummaryJobStatus();
+          const r = job?.result;
+          if (r) {
+            setTodayText(String(r.summary || ''));
+            if (typeof r.scoreLocal === 'number') setScoreLocal(r.scoreLocal);
+            if (typeof r.scoreAi === 'number') setScoreAi(r.scoreAi);
+            if (typeof r.progressPercent === 'number') setProgressPercent(r.progressPercent);
+            if (typeof r.lastGenAt === 'number') setLastGenAt(r.lastGenAt);
+            if (typeof r.chunksCount === 'number') setChunksCount(r.chunksCount);
+            if (typeof r.aiModel === 'string' || r.aiModel === null) setAiModel(r.aiModel ?? null);
+            if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
+            if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
+            if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
+          }
+        } catch {}
+        // Refresh persisted values
+        await loadToday();
+        await loadTotals();
+        await loadTodayLive();
+        await loadDailyRange();
+      }
+    });
+    (async () => {
+      try {
+        const job: any = await window.api.getSummaryJobStatus();
+        setTodayBusy(job?.status === 'running');
+        setJobProgress(typeof job?.progress === 'number' ? job.progress : 0);
+        if (job?.status === 'done' && job?.result) {
+          const r = job.result;
+          // Update UI from cached result
+          setTodayText(String(r.summary || ''));
+          if (typeof r.scoreLocal === 'number') setScoreLocal(r.scoreLocal);
+          if (typeof r.scoreAi === 'number') setScoreAi(r.scoreAi);
+          if (typeof r.progressPercent === 'number') setProgressPercent(r.progressPercent);
+          if (typeof r.lastGenAt === 'number') setLastGenAt(r.lastGenAt);
+          if (typeof r.chunksCount === 'number') setChunksCount(r.chunksCount);
+          if (typeof r.aiModel === 'string' || r.aiModel === null) setAiModel(r.aiModel ?? null);
+          if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
+          if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
+          if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
+          await loadToday();
+          await loadTotals();
+          await loadTodayLive();
+          await loadDailyRange();
+        }
+      } catch {}
+    })();
+    return () => { try { off && off(); } catch {} };
+  }, [loadDailyRange]);
+
   // derive trend from daily array when API trend is missing or stale
   React.useEffect(() => {
     if (!daily || daily.length < 2) { setTrendDerived(null); return; }
@@ -300,40 +359,17 @@ const Dashboard: React.FC = () => {
 
   const generateTodaySummary = async () => {
     if (!window.api) return;
-    setTodayBusy(true);
     setError('');
+    setTodayBusy(true);
+    setJobProgress(0);
     try {
-      await window.api.trackingAnalyzeOnce({});
-      const res = await window.api.summaryTodayDiff();
-      // Be resilient to different key styles from backend or model output
-      const anyRes: any = res as any;
-      const md = (anyRes.summary ?? anyRes.markdown ?? '（无内容）');
-      setTodayText(String(md));
-      // meta 将在 loadToday() 后端持久化读取，这里仅临时显示
-      setLastGenAt(Date.now());
-      if (chunksCount === null) {
-        try {
-          const m = String(md).match(/###\s*分片\s+\d+/g);
-          setChunksCount(m ? m.length : null);
-        } catch {}
+      const res: any = await window.api.startSummaryJob();
+      if (res?.ok === false && res?.error) {
+        throw new Error(res.error);
       }
-      const sl = (typeof anyRes.scoreLocal === 'number') ? anyRes.scoreLocal :
-                 (typeof anyRes.score_local === 'number') ? anyRes.score_local : undefined;
-      const sa = (typeof anyRes.scoreAi === 'number') ? anyRes.scoreAi :
-                 (typeof anyRes.score_ai === 'number') ? anyRes.score_ai : undefined;
-      const pp = (typeof anyRes.progressPercent === 'number') ? anyRes.progressPercent :
-                 (typeof anyRes.progress_percent === 'number') ? anyRes.progress_percent : undefined;
-      if (typeof sl === 'number') setScoreLocal(sl);
-      if (typeof sa === 'number') setScoreAi(sa);
-      if (typeof pp === 'number') setProgressPercent(pp);
-      if (res && typeof (res as any).featuresSummary === 'string') setFeaturesSummary((res as any).featuresSummary);
-      await loadToday();
-      await loadTotals();
-      await loadTodayLive();
-      await loadDailyRange();
+      // 若已在运行，进度事件会更新 todayBusy/进度；无需等待
     } catch (e: any) {
       setError(e?.message ?? '生成今日总结失败');
-    } finally {
       setTodayBusy(false);
     }
   };
@@ -373,7 +409,15 @@ const Dashboard: React.FC = () => {
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="total" /> 总改动数</div>
           <StatValue value={totals?.total ?? '-'} />
-          <div className="text-xs opacity-70 mt-1">新增 {typeof totals?.insertions === 'number' ? formatCompact(totals.insertions) : 0} · 删除 {typeof totals?.deletions === 'number' ? formatCompact(totals.deletions) : 0}</div>
+          {(() => {
+            // 对齐“今日新增/今日删除”口径，使用今日实时计数显示细分
+            const insToday = (todayLive?.insertions ?? today?.insertions) ?? 0;
+            const delToday = (todayLive?.deletions ?? today?.deletions) ?? 0;
+            const totalToday = (typeof insToday === 'number' ? insToday : 0) + (typeof delToday === 'number' ? delToday : 0);
+            return (
+              <div className="text-xs opacity-70 mt-1">新增 {formatCompact(totalToday)}</div>
+            );
+          })()}
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="local" /> 本地进步分</div>
@@ -443,7 +487,7 @@ const Dashboard: React.FC = () => {
           onClick={generateTodaySummary}
           disabled={todayBusy}
           className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 disabled:opacity-60"
-        >{todayBusy ? '生成中…' : '生成今日总结'}</button>
+        >{todayBusy ? `生成中…${jobProgress ? ` ${jobProgress}%` : ''}` : '生成今日总结'}</button>
         <button
           onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }}
           className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"

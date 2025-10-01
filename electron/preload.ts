@@ -30,4 +30,13 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('window:maximize-changed', listener);
     return () => ipcRenderer.removeListener('window:maximize-changed', listener);
   },
+
+  // background summary job
+  startSummaryJob: () => ipcRenderer.invoke('summary:job:start'),
+  getSummaryJobStatus: () => ipcRenderer.invoke('summary:job:status'),
+  onSummaryJobProgress: (callback: (payload: { id: string; progress: number; status: string }) => void) => {
+    const listener = (_: unknown, payload: { id: string; progress: number; status: string }) => callback(payload);
+    ipcRenderer.on('summary:job:progress', listener);
+    return () => ipcRenderer.removeListener('summary:job:progress', listener);
+  },
 });

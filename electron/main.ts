@@ -5,21 +5,118 @@ import fs from 'node:fs';
 import { analyzeDiff } from './services/codeAnalyzer';
 import { scoreProgress, scoreFromFeatures } from './services/progressScorer';
 import { extractDiffFeatures } from './services/diffFeatures';
-import { summarizeWithAI, summarizeUnifiedDiff, summarizeUnifiedDiffChunked } from './services/aiSummarizer';
+import { summarizeWithAI } from './services/aiSummarizer';
 import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
 import { GitAnalyzer } from './services/gitAnalyzer';
 import { DB } from './services/db_sqljs';
+import { db } from './services/dbInstance';
+import { todayKey } from './services/dateUtil';
+import { calcProgressPercentByPrevLocal } from './services/progressCalculator';
+import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
 const tracker = new TrackerService();
 const stats = new StatsService();
-const db = new DB();
 
 let win: BrowserWindow | null = null;
+
+// --- Simple background job state for today's summary ---
+type JobStatus = {
+  id: string;
+  type: 'today-summary';
+  status: 'idle' | 'running' | 'done' | 'error';
+  progress: number; // 0..100
+  startedAt?: number;
+  finishedAt?: number;
+  error?: string;
+  result?: { 
+    date: string; 
+    summary: string; 
+    scoreAi: number; 
+    scoreLocal: number; 
+    progressPercent: number; 
+    featuresSummary: string;
+    aiModel?: string | null;
+    aiProvider?: string | null;
+    aiTokens?: number | null;
+    aiDurationMs?: number | null;
+    chunksCount?: number | null;
+    lastGenAt?: number | null;
+  };
+};
+let summaryJob: JobStatus = { id: 'today', type: 'today-summary', status: 'idle', progress: 0 };
+
+function emitSummaryProgress(p: number) {
+  summaryJob.progress = Math.max(0, Math.min(100, Math.round(p)));
+  if (win) {
+    try { win.webContents.send('summary:job:progress', { id: summaryJob.id, progress: summaryJob.progress, status: summaryJob.status }); } catch {}
+  }
+}
+
+async function runTodaySummaryJob(): Promise<JobStatus['result']> {
+  // This reuses the logic of summary:todayDiff handler below (kept in sync)
+  summaryJob.status = 'running';
+  summaryJob.startedAt = Date.now();
+  emitSummaryProgress(1);
+  // Preparation done
+  emitSummaryProgress(10);
+  // Delegate to SummaryService with chunked progress mapping
+  const res = await generateTodaySummary({
+    onProgress: (done, total) => {
+      const base = 20; // after preparation
+      const span = 75; // 20 -> 95
+      const pct = base + Math.floor((span * done) / Math.max(1, total));
+      emitSummaryProgress(Math.min(95, Math.max(20, pct)));
+    }
+  });
+  emitSummaryProgress(100);
+  return {
+    date: res.date,
+    summary: res.summary,
+    scoreAi: res.scoreAi,
+    scoreLocal: res.scoreLocal,
+    progressPercent: res.progressPercent,
+    featuresSummary: res.featuresSummary,
+    aiModel: res.model,
+    aiProvider: res.provider,
+    aiTokens: res.tokens,
+    aiDurationMs: res.durationMs,
+    chunksCount: res.chunksCount,
+    lastGenAt: res.lastGenAt,
+  };
+}
+
+// IPC: background job controls
+ipcMain.handle('summary:job:start', async () => {
+  if (summaryJob.status === 'running') {
+    return { ok: true, job: summaryJob };
+  }
+  summaryJob = { id: 'today', type: 'today-summary', status: 'running', progress: 0, startedAt: Date.now() };
+  // Fire-and-forget: don't block the IPC reply
+  (async () => {
+    try {
+      const res = await runTodaySummaryJob();
+      summaryJob.result = res;
+      summaryJob.status = 'done';
+      summaryJob.finishedAt = Date.now();
+      emitSummaryProgress(100);
+    } catch (e: any) {
+      summaryJob.status = 'error';
+      summaryJob.error = e?.message || String(e);
+      summaryJob.finishedAt = Date.now();
+      emitSummaryProgress(summaryJob.progress || 0);
+    }
+  })();
+  return { ok: true, job: summaryJob };
+});
+
+ipcMain.handle('summary:job:status', async () => {
+  return summaryJob;
+});
 
 async function createWindow() {
   // Resolve preload path (.js in dev/build, sometimes .cjs depending on bundler)
@@ -200,108 +297,26 @@ ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string
 
 // Summarize today's concrete code changes via unified diff
 ipcMain.handle('summary:todayDiff', async () => {
-  const cfg = await getConfig();
-  const repo = cfg.repoPath;
-  if (!repo) throw new Error('未设置仓库路径');
-  const git = new GitAnalyzer(repo);
-  // Use LOCAL date (YYYY-MM-DD)
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const today = `${yyyy}-${mm}-${dd}`;
-  // Build unified diff and semantic features first
-  const diff = await git.getUnifiedDiffSinceDate(today);
-  const feats = extractDiffFeatures(diff);
-  // Local semantic score
-  const localScore = scoreFromFeatures(feats);
-  // Previous baseline
-  let prevBase = 0;
-  try {
-    const y = db.getYesterday(today);
-    if (y) {
-      const prev = await db.getDay(y);
-      prevBase = prev?.baseScore || 0;
-    }
-  } catch {}
-
-  // Summarize with AI and pass context metrics
-  // Also compute git numstat for persistence below
-  const ns = await git.getNumstatSinceDate(today);
-  // Prefer chunked summarization to avoid context overflow; fallback to single-shot
-  let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
-  try {
-    summaryRes = await summarizeUnifiedDiffChunked(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
-  } catch {
-    summaryRes = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
-  }
-  let aiScore = 0;
-  let markdown = '';
-  try {
-    const obj = JSON.parse(summaryRes.text);
-    aiScore = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
-    markdown = String(obj?.markdown || '');
-  } catch {
-    // 回退：若不是 JSON，则当作纯文本 markdown 处理
-    markdown = summaryRes.text || '';
-  }
-
-  // Compute progress percent vs yesterday baseline
-  let progressPercent = 0;
-  if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
-  else progressPercent = localScore > 0 ? 100 : 0;
-  // Round and clamp to a maximum of 25%
-  progressPercent = Math.round(progressPercent);
-  if (progressPercent > 25) progressPercent = 25;
-
-  // Save counts, ensure row, save markdown and AI base score
-  try {
-    await db.setDayCounts(today, ns.insertions, ns.deletions);
-  } catch {}
-  try {
-    const existed = await db.getDay(today);
-    if (!existed) await db.upsertDayAccumulate(today, 0, 0);
-    if (markdown) await db.setDaySummary(today, markdown);
-    // Do NOT overwrite cumulative baseScore with AI score; keep baseScore monotonic
-    await db.updateAggregatesForDate(today);
-  } catch {}
-
-  // Persist metrics and append to history
-  try {
-    await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
-    // persist AI meta & generation info
-    const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
-      ? summaryRes.tokens
-      : Math.max(1, Math.round((markdown?.length || 0) / 4));
-    await db.setDayAiMeta(today, {
-      aiModel: summaryRes.model || undefined,
-      aiProvider: summaryRes.provider || undefined,
-      aiTokens: estTokens,
-      aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
-      chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
-      lastGenAt: Date.now(),
-    });
-    const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
-    await storage.append(record);
-  } catch {}
-
-  const featuresSummary = `代码文件:${feats.codeFiles} 测试:${feats.testFiles} 文档:${feats.docFiles} 配置:${feats.configFiles} Hunk:${feats.hunks} 重命名:${feats.renameOrMove} 语言:${Object.keys(feats.languages||{}).join('+')||'-'} 依赖变更:${feats.dependencyChanges?'是':'否'} 安全敏感:${feats.hasSecuritySensitive?'是':'否'}`;
-  return { date: today, summary: markdown, scoreAi: aiScore, scoreLocal: localScore, progressPercent, featuresSummary };
+  const res = await generateTodaySummary();
+  return {
+    date: res.date,
+    summary: res.summary,
+    scoreAi: res.scoreAi,
+    scoreLocal: res.scoreLocal,
+    progressPercent: res.progressPercent,
+    featuresSummary: res.featuresSummary,
+    aiModel: res.model,
+    aiProvider: res.provider,
+    aiTokens: res.tokens,
+    aiDurationMs: res.durationMs,
+    chunksCount: res.chunksCount,
+    lastGenAt: res.lastGenAt,
+  };
 });
 
 // Return today's unified diff text for in-app visualization
 ipcMain.handle('diff:today', async () => {
-  const cfg = await getConfig();
-  const repo = cfg.repoPath;
-  if (!repo) throw new Error('未设置仓库路径');
-  const git = new GitAnalyzer(repo);
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const today = `${yyyy}-${mm}-${dd}`;
-  const diff = await git.getUnifiedDiffSinceDate(today);
-  return { date: today, diff };
+  return buildTodayUnifiedDiff();
 });
 
 // Totals across all days
@@ -332,7 +347,8 @@ ipcMain.handle('stats:getTodayLive', async () => {
       }
     } catch {}
   } catch {}
-  return { date: today, insertions: ns.insertions, deletions: ns.deletions };
+  const total = Math.max(0, (ns.insertions || 0)) + Math.max(0, (ns.deletions || 0));
+  return { date: today, insertions: ns.insertions, deletions: ns.deletions, total };
 });
 
 // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
