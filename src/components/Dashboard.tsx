@@ -32,13 +32,19 @@ const Dashboard: React.FC = () => {
   const [scoreLocal, setScoreLocal] = useState<number | null>(null);
   const [scoreAi, setScoreAi] = useState<number | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
+  const [featuresSummary, setFeaturesSummary] = useState<string>('');
 
   const loadToday = async () => {
     if (!window.api) return;
     const t = await window.api.statsGetToday();
     setToday(t);
-    // initialize AI score from today's baseScore (computed/saved on last summary)
-    if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore);
+    // initialize metrics from persisted DB values if available
+    if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
+    if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
+    else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
+    if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
+    // show persisted markdown immediately if no local text yet
+    if (!todayText && typeof t?.summary === 'string') setTodayText(t.summary);
   };
 
   const loadTotals = async () => {
@@ -95,6 +101,7 @@ const Dashboard: React.FC = () => {
       if (typeof res.scoreLocal === 'number') setScoreLocal(res.scoreLocal);
       if (typeof res.scoreAi === 'number') setScoreAi(res.scoreAi);
       if (typeof res.progressPercent === 'number') setProgressPercent(res.progressPercent);
+      if (typeof res.featuresSummary === 'string') setFeaturesSummary(res.featuresSummary);
       await loadToday();
       await loadTotals();
       await loadTodayLive();
@@ -129,15 +136,15 @@ const Dashboard: React.FC = () => {
           <div className="text-2xl font-semibold">{totals?.total ?? '-'}</div>
           <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">本地进步分</div>
           <div className="text-2xl font-semibold">{scoreLocal ?? '—'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">AI 进步分</div>
           <div className="text-2xl font-semibold">{scoreAi ?? '—'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">进步百分比</div>
           <div className={`text-2xl font-semibold ${((progressPercent||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{
             (progressPercent !== null && progressPercent !== undefined) ? `${progressPercent}%` : '—'

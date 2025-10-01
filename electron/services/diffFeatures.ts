@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { analyzeJsTsSnippet } from './astFeatures';
 
 export type DiffFeatures = {
   filesTotal: number;
@@ -13,6 +14,13 @@ export type DiffFeatures = {
   languages: Record<string, number>; // by file ext
   dependencyChanges: boolean; // package.json, lockfiles, requirements, etc.
   hasSecuritySensitive: boolean; // e.g., changes in auth, crypto, config keys
+  // Heuristic symbol additions from diff for JS/TS family
+  jsTsSymbolAdds?: {
+    functions: number;
+    classes: number;
+    exports: number;
+  };
+  changedFiles?: string[];
 };
 
 const CODE_EXTS = new Set([
@@ -41,6 +49,8 @@ export function extractDiffFeatures(unifiedDiff: string): DiffFeatures {
   let codeFiles = 0, docFiles = 0, testFiles = 0, configFiles = 0, renameOrMove = 0, hasSecuritySensitive = false;
   const languages: Record<string, number> = {};
   let currentFile: string | null = null;
+  let jsFuncAdds = 0, jsClassAdds = 0, jsExportAdds = 0;
+  const addedSnippets: Record<string, string[]> = {};
 
   for (const line of lines) {
     if (line.startsWith('diff --git')) {
@@ -65,11 +75,34 @@ export function extractDiffFeatures(unifiedDiff: string): DiffFeatures {
       hunks++;
       continue;
     }
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++;
+      if (currentFile) {
+        const ext = path.extname(currentFile).replace(/^\./,'').toLowerCase();
+        if (['ts','tsx','js','jsx','mjs','cjs'].includes(ext)) {
+          const content = line.slice(1);
+          if (/\bfunction\b|=>\s*\(/.test(content)) jsFuncAdds++;
+          if (/\bclass\s+[A-Za-z0-9_]/.test(content)) jsClassAdds++;
+          if (/\bexport\b/.test(content)) jsExportAdds++;
+          (addedSnippets[currentFile] ||= []).push(content);
+        }
+      }
+    }
     else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
   }
 
   const dependencyChanges = Array.from(files).some(f => CONFIG_HINTS.some(r => r.test(f)));
+
+  // AST-based analysis on aggregated added snippets per JS/TS file
+  try {
+    for (const fpath of Object.keys(addedSnippets)) {
+      const joined = addedSnippets[fpath].join('\n');
+      const m = analyzeJsTsSnippet(joined);
+      jsFuncAdds += Math.max(0, m.functions || 0);
+      jsClassAdds += Math.max(0, m.classes || 0);
+      jsExportAdds += Math.max(0, m.exports || 0);
+    }
+  } catch {}
 
   return {
     filesTotal: files.size,
@@ -84,5 +117,7 @@ export function extractDiffFeatures(unifiedDiff: string): DiffFeatures {
     languages,
     dependencyChanges,
     hasSecuritySensitive,
+    jsTsSymbolAdds: { functions: jsFuncAdds, classes: jsClassAdds, exports: jsExportAdds },
+    changedFiles: Array.from(files),
   };
 }

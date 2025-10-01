@@ -217,13 +217,15 @@ ipcMain.handle('summary:todayDiff', async () => {
     await db.updateAggregatesForDate(today);
   } catch {}
 
-  // Append to history with AI score (for charting continuity)
+  // Persist metrics and append to history
   try {
+    await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
     const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
   } catch {}
 
-  return { date: today, summary: markdown, scoreAi: aiScore, scoreLocal: localScore, progressPercent };
+  const featuresSummary = `代码文件:${feats.codeFiles} 测试:${feats.testFiles} 文档:${feats.docFiles} 配置:${feats.configFiles} Hunk:${feats.hunks} 重命名:${feats.renameOrMove} 语言:${Object.keys(feats.languages||{}).join('+')||'-'} 依赖变更:${feats.dependencyChanges?'是':'否'} 安全敏感:${feats.hasSecuritySensitive?'是':'否'}`;
+  return { date: today, summary: markdown, scoreAi: aiScore, scoreLocal: localScore, progressPercent, featuresSummary };
 });
 
 // Return today's unified diff text for in-app visualization
