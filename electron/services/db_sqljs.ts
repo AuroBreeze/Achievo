@@ -171,7 +171,10 @@ export class DB {
     const raw = Math.max(0, insertions) * wAdded + Math.max(0, deletions) * wRemoved;
     const alpha = 220;
     const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
-    const next = Math.max(100, prevBase) + Math.max(0, dailyInc);
+    // Cap increment to 25% of previous base
+    const base0 = Math.max(100, prevBase);
+    const incCapped = Math.min(Math.max(0, dailyInc), base0 * 0.25);
+    const next = base0 + incCapped;
     return Math.round(next);
   }
 
@@ -250,10 +253,13 @@ export class DB {
     const rawLines = ins * 0.8 + del * 0.4;
     const incLines = 60 * (1 - Math.exp(-rawLines / 300));
     const aiPart = Math.max(0, Math.min(30, (typeof ai === 'number' ? ai : 0) * 0.3));
-    const localRel = prevBase > 0 ? (((typeof loc === 'number' ? loc : 0) - prevBase) / prevBase) : 0;
-    const incLocal = Math.max(0, Math.min(40, localRel * 40 * 1));
+    // Absolute local contribution (0..40), decoupled from prevBase to avoid always-0 when prevBase is high
+    const locAbs = Math.max(0, Math.min(100, (typeof loc === 'number' ? loc : 0)));
+    const incLocal = Math.max(0, Math.min(40, locAbs * 0.4));
     const dailyInc = incLines + aiPart + incLocal;
-    const nextBase = Math.round(prevBase + Math.max(0, dailyInc));
+    // Cap increment to 25% of previous base
+    const incCapped = Math.min(Math.max(0, dailyInc), prevBase * 0.25);
+    const nextBase = Math.round(prevBase + incCapped);
     const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : 0;
 
     this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);

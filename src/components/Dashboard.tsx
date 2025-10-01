@@ -267,15 +267,18 @@ const Dashboard: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    loadToday();
-    loadTotals();
-    loadTodayLive();
-    loadDailyRange();
-    const id = setInterval(() => {
-      loadToday();
-      loadTotals();
-      loadTodayLive();
-      loadDailyRange();
+    // Ensure live -> then fetch today so recomputed base/trend are visible immediately
+    (async () => {
+      await loadTodayLive();
+      await loadToday();
+      await loadTotals();
+      await loadDailyRange();
+    })();
+    const id = setInterval(async () => {
+      await loadTodayLive();
+      await loadToday();
+      await loadTotals();
+      await loadDailyRange();
     }, 10000);
     return () => clearInterval(id);
   }, [loadDailyRange]);
@@ -324,6 +327,7 @@ const Dashboard: React.FC = () => {
       await loadToday();
       await loadTotals();
       await loadTodayLive();
+      await loadDailyRange();
     } catch (e: any) {
       setError(e?.message ?? '生成今日总结失败');
     } finally {

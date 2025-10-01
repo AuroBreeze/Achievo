@@ -295,7 +295,16 @@ ipcMain.handle('stats:getTodayLive', async () => {
   const today = `${yyyy}-${mm}-${dd}`;
   const ns = await git.getNumstatSinceDate(today);
   // Persist to DB for real-time baseScore/trend
-  try { await db.setDayCounts(today, ns.insertions, ns.deletions); } catch {}
+  try {
+    await db.setDayCounts(today, ns.insertions, ns.deletions);
+    // If AI/local scores already exist, recompute baseScore with hybrid metrics immediately
+    try {
+      const row = await db.getDay(today);
+      if (row && (typeof row.aiScore === 'number' || typeof row.localScore === 'number')) {
+        await db.setDayMetrics(today, { aiScore: row.aiScore ?? undefined, localScore: row.localScore ?? undefined, progressPercent: row.progressPercent ?? undefined });
+      }
+    } catch {}
+  } catch {}
   return { date: today, insertions: ns.insertions, deletions: ns.deletions };
 });
 
