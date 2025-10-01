@@ -13,7 +13,7 @@ declare global {
       trackingStatus(): Promise<{ running: boolean; repoPath?: string; intervalMs?: number; lastProcessedCommit?: string | null; lastError?: string | null }>;
       trackingAnalyzeOnce(payload: { repoPath?: string }): Promise<{ running: boolean; repoPath?: string; intervalMs?: number; lastProcessedCommit?: string | null; lastError?: string | null }>;
       statsGetToday(): Promise<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null; createdAt: number; updatedAt: number }>;
-      statsGetRange(payload: { startDate: string; endDate: string }): Promise<Array<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null; createdAt: number; updatedAt: number }>>;
+      statsGetRange(payload: { startDate: string; endDate: string }): Promise<Array<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null; createdAt: number; updatedAt: number }>>;
       summaryGenerate(): Promise<{ date: string; summary: string }>;
       summaryTodayDiff(): Promise<{ date: string; summary: string; scoreAi?: number; scoreLocal?: number; progressPercent?: number; featuresSummary?: string }>;
       diffToday(): Promise<{ date: string; diff: string }>;

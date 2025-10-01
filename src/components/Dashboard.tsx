@@ -33,6 +33,7 @@ const Dashboard: React.FC = () => {
   const [scoreAi, setScoreAi] = useState<number | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [featuresSummary, setFeaturesSummary] = useState<string>('');
+  const [daily, setDaily] = useState<Array<{ date: string; baseScore: number; aiScore: number | null; localScore: number | null; progressPercent: number | null }>>([]);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -97,6 +98,23 @@ const Dashboard: React.FC = () => {
     loadTodayLive();
     // load history for chart
     window.api?.getHistory?.().then((items: any[]) => setHistory((items||[]).map(i => ({ timestamp: i.timestamp, score: i.score }))));
+    // load last 30 days daily metrics
+    (async () => {
+      if (!window.api?.statsGetRange) return;
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const rows = await window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) });
+      const mapped = (rows||[]).map(r => ({
+        date: r.date,
+        baseScore: r.baseScore,
+        aiScore: (r as any).aiScore ?? null,
+        localScore: (r as any).localScore ?? null,
+        progressPercent: (r as any).progressPercent ?? null,
+      })).sort((a,b)=> a.date.localeCompare(b.date));
+      setDaily(mapped);
+    })();
     const id = setInterval(() => { loadToday(); loadTotals(); loadTodayLive(); }, 10000);
     return () => clearInterval(id);
   }, []);
@@ -169,6 +187,49 @@ const Dashboard: React.FC = () => {
           <div className={`text-2xl font-semibold ${((progressPercent||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{
             (progressPercent !== null && progressPercent !== undefined) ? `${progressPercent}%` : '—'
           }</div>
+        </div>
+      </section>
+      {/* Per-day metrics charts */}
+      <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <h3 className="font-medium mb-2">基础分（按天）</h3>
+          <Line
+            data={{
+              labels: daily.map(d => d.date),
+              datasets: [{ label: '基础分', data: daily.map(d => d.baseScore), borderColor: '#22c55e' }],
+            }}
+            options={{ responsive: true, scales: { y: { beginAtZero: true } } }}
+          />
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <h3 className="font-medium mb-2">本地进步分（按天）</h3>
+          <Line
+            data={{
+              labels: daily.map(d => d.date),
+              datasets: [{ label: '本地进步分', data: daily.map(d => (d.localScore ?? null) as any), borderColor: '#3b82f6' }],
+            }}
+            options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
+          />
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <h3 className="font-medium mb-2">AI 进步分（按天）</h3>
+          <Line
+            data={{
+              labels: daily.map(d => d.date),
+              datasets: [{ label: 'AI 进步分', data: daily.map(d => (d.aiScore ?? null) as any), borderColor: '#a78bfa' }],
+            }}
+            options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
+          />
+        </div>
+        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+          <h3 className="font-medium mb-2">进步百分比（按天）</h3>
+          <Line
+            data={{
+              labels: daily.map(d => d.date),
+              datasets: [{ label: '进步百分比(%)', data: daily.map(d => (d.progressPercent ?? null) as any), borderColor: '#f59e0b' }],
+            }}
+            options={{ responsive: true, scales: { y: { beginAtZero: true } } }}
+          />
         </div>
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">
