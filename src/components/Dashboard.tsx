@@ -38,6 +38,53 @@ function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
+// Small inline icons for stat cards
+const StatIcon: React.FC<{ name: 'add' | 'del' | 'score' | 'trend' | 'total' | 'local' | 'ai' | 'percent' }> = ({ name }) => {
+  const cls = 'w-4 h-4';
+  switch (name) {
+    case 'add':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14M5 12h14"/></svg>
+      );
+    case 'del':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 7h14M9 7v12m6-12v12M10 4h4l1 3H9l1-3Z"/></svg>
+      );
+    case 'score':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 12a9 9 0 1 1 18 0"/><path d="M7 12l3 3 7-7"/></svg>
+      );
+    case 'trend':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 17l6-6 4 4 7-7"/></svg>
+      );
+    case 'total':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 3h18v6H3zM3 15h18v6H3z"/></svg>
+      );
+    case 'local':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 3l9 4.5-9 4.5-9-4.5Z"/><path d="M3 12l9 4.5 9-4.5"/></svg>
+      );
+    case 'ai':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="4"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4M5 5l2.5 2.5M16.5 16.5 19 19M5 19l2.5-2.5M16.5 7.5 19 5"/></svg>
+      );
+    case 'percent':
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+      );
+  }
+};
+
+// Skeleton value renderer
+const StatValue: React.FC<{ value: React.ReactNode }> = ({ value }) => {
+  if (value === null || value === undefined || value === '-') {
+    return <div className="h-6 w-16 rounded bg-slate-700/60 animate-pulse" />;
+  }
+  return <div className="text-2xl font-semibold">{value}</div>;
+};
+
 // Helper: replace any top-level JSON object that contains a markdown/summary/text field with that field content
 function replaceJsonObjectWithMarkdown(text: string): string {
   let out = String(text);
@@ -189,45 +236,47 @@ const Dashboard: React.FC = () => {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <section className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <div className="text-sm opacity-75">今日新增</div>
-          <div className="text-2xl font-semibold">{(todayLive?.insertions ?? today?.insertions) ?? '-'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="add" /> 今日新增</div>
+          <StatValue value={(todayLive?.insertions ?? today?.insertions) ?? '-'} />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <div className="text-sm opacity-75">今日删除</div>
-          <div className="text-2xl font-semibold">{(todayLive?.deletions ?? today?.deletions) ?? '-'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="del" /> 今日删除</div>
+          <StatValue value={(todayLive?.deletions ?? today?.deletions) ?? '-'} />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <div className="text-sm opacity-75">基础分</div>
-          <div className="text-2xl font-semibold">{today?.baseScore ?? '-'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="score" /> 基础分</div>
+          <StatValue value={today?.baseScore ?? '-'} />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <div className="text-sm opacity-75">趋势(较昨日)</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="trend" /> 趋势(较昨日)</div>
           <div className={`text-2xl font-semibold ${((today?.trend||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{today?.trend ?? '-'}</div>
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <div className="text-sm opacity-75">总改动数</div>
-          <div className="text-2xl font-semibold">{totals?.total ?? '-'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="total" /> 总改动数</div>
+          <StatValue value={totals?.total ?? '-'} />
           <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
-          <div className="text-sm opacity-75">本地进步分</div>
-          <div className="text-2xl font-semibold">{scoreLocal ?? '—'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="local" /> 本地进步分</div>
+          <StatValue value={scoreLocal ?? '—'} />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
-          <div className="text-sm opacity-75">AI 进步分</div>
-          <div className="text-2xl font-semibold">{scoreAi ?? '—'}</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="ai" /> AI 进步分</div>
+          <StatValue value={scoreAi ?? '—'} />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
-          <div className="text-sm opacity-75">进步百分比</div>
+          <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="percent" /> 进步百分比</div>
           <div className={`text-2xl font-semibold ${((progressPercent||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{
             (progressPercent !== null && progressPercent !== undefined) ? `${progressPercent}%` : '—'
           }</div>
         </div>
       </section>
+      <div className="lg:col-span-2 h-px bg-slate-700/60" />
       {/* Per-day metrics charts */}
       <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2">基础分（按天）</h3>
+          <h3 className="text-sm font-semibold text-slate-100 mb-1">基础分（按天）</h3>
+          <p className="text-xs text-slate-400 mb-2">展示最近30天基础分趋势</p>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -237,7 +286,8 @@ const Dashboard: React.FC = () => {
           />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2">本地进步分（按天）</h3>
+          <h3 className="text-sm font-semibold text-slate-100 mb-1">本地进步分（按天）</h3>
+          <p className="text-xs text-slate-400 mb-2">展示最近30天本地语义分趋势</p>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -247,7 +297,8 @@ const Dashboard: React.FC = () => {
           />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2">AI 进步分（按天）</h3>
+          <h3 className="text-sm font-semibold text-slate-100 mb-1">AI 进步分（按天）</h3>
+          <p className="text-xs text-slate-400 mb-2">展示最近30天 AI 评分趋势</p>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -257,7 +308,8 @@ const Dashboard: React.FC = () => {
           />
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-          <h3 className="text-sm font-semibold text-slate-100 mb-2">进步百分比（按天）</h3>
+          <h3 className="text-sm font-semibold text-slate-100 mb-1">进步百分比（按天）</h3>
+          <p className="text-xs text-slate-400 mb-2">相对昨日基准的日度进步百分比</p>
           <Line
             data={{
               labels: daily.map(d => d.date),
