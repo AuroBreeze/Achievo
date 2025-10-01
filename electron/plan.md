@@ -34,25 +34,25 @@
   - [ ] 补齐：`getTodayLive()`、`getTotalsLive()` 的核心逻辑迁入 service，`main.ts` 仅做 IPC 转发。
 
 - [ ] Utilities
-  - [ ] `dateUtil.ts`：`todayKey()`、`yesterdayKey(key)`、`toKey(date)`。
-  - [ ] `progressCalculator.ts`：`calcProgressPercentByPrevLocal(currentLocal, prevLocal?, defaultDenom=50, cap=25)`。
+  - [x] `dateUtil.ts`：`todayKey()`、`yesterdayKey(key)`、`toKey(date)`。
+  - [x] `progressCalculator.ts`：`calcProgressPercentByPrevLocal(currentLocal, prevLocal?, defaultDenom=50, cap=25)`。
 
-## IPC 设计（main.ts 保留）
-- [ ] `summary:job:start` / `summary:job:status` / `summary:job:progress`（转调 JobManager + SummaryService）
-- [ ] `summary:todayDiff` → `SummaryService.generateTodaySummary()`（直调版，保留）
-- [ ] `diff:today` → `SummaryService.buildTodayUnifiedDiff()`
+-## IPC 设计（main.ts 保留）
+- [x] `summary:job:start` / `summary:job:status` / `summary:job:progress`（转调 JobManager + SummaryService）
+- [x] `summary:todayDiff` → `SummaryService.generateTodaySummary()`（直调版，保留）
+- [x] `diff:today` → `SummaryService.buildTodayUnifiedDiff()`
 - [ ] `stats:getToday` / `stats:getRange` / `stats:getTotals` / `stats:getTodayLive` / `stats:getTotalsLive` → 转发到 `StatsService`
 - [ ] 配置、窗口控制、tracking：保持不变
 
 ## 进度映射（后台任务）
-- [ ] 10%：准备完成（配置/仓库/日期）
-- [ ] 20%：提取特征、本地分计算
-- [ ] 20%..95%：分片摘要进度（`onProgress(done,total)`）
-- [ ] 96%..100%：AI 返回与持久化完成
+- [x] 10%：准备完成（配置/仓库/日期）
+- [x] 20%：提取特征、本地分计算
+- [x] 20%..95%：分片摘要进度（`onProgress(done,total)`）
+- [x] 96%..100%：AI 返回与持久化完成
 
 ## 迁移步骤（小步快跑，可回滚）
-- [ ] 抽出 `dateUtil.ts` 与 `progressCalculator.ts`，替换 `main.ts` 内部调用。
-- [ ] 新建 `summaryService.ts`，将 `summary:todayDiff` 与 `runTodaySummaryJob()` 流程迁入，`main.ts` 改为调用 service。
+- [x] 抽出 `dateUtil.ts` 与 `progressCalculator.ts`，替换 `main.ts` 内部调用。
+- [x] 新建 `summaryService.ts`，将 `summary:todayDiff` 与 `runTodaySummaryJob()` 流程迁入，`main.ts` 改为调用 service。
 - [ ] 新建 `jobManager.ts`，`summary:job:start`/`status` 与事件发射逻辑迁入。
 - [ ] 扩展 `stats.ts`，把 `getTodayLive`/`getTotalsLive` 核心逻辑迁入，`main.ts` 只转发。
 - [ ] 新建 `window.ts`，抽离窗口创建与事件绑定。

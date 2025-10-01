@@ -290,9 +290,32 @@ const Dashboard: React.FC = () => {
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
     if (!window.api) return;
-    const off = window.api.onSummaryJobProgress(({ status, progress }) => {
+    const off = window.api.onSummaryJobProgress(async ({ status, progress }) => {
       setTodayBusy(status === 'running');
       setJobProgress(typeof progress === 'number' ? progress : 0);
+      if (status === 'done') {
+        try {
+          const job: any = await window.api.getSummaryJobStatus();
+          const r = job?.result;
+          if (r) {
+            setTodayText(String(r.summary || ''));
+            if (typeof r.scoreLocal === 'number') setScoreLocal(r.scoreLocal);
+            if (typeof r.scoreAi === 'number') setScoreAi(r.scoreAi);
+            if (typeof r.progressPercent === 'number') setProgressPercent(r.progressPercent);
+            if (typeof r.lastGenAt === 'number') setLastGenAt(r.lastGenAt);
+            if (typeof r.chunksCount === 'number') setChunksCount(r.chunksCount);
+            if (typeof r.aiModel === 'string' || r.aiModel === null) setAiModel(r.aiModel ?? null);
+            if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
+            if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
+            if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
+          }
+        } catch {}
+        // Refresh persisted values
+        await loadToday();
+        await loadTotals();
+        await loadTodayLive();
+        await loadDailyRange();
+      }
     });
     (async () => {
       try {
@@ -306,6 +329,12 @@ const Dashboard: React.FC = () => {
           if (typeof r.scoreLocal === 'number') setScoreLocal(r.scoreLocal);
           if (typeof r.scoreAi === 'number') setScoreAi(r.scoreAi);
           if (typeof r.progressPercent === 'number') setProgressPercent(r.progressPercent);
+          if (typeof r.lastGenAt === 'number') setLastGenAt(r.lastGenAt);
+          if (typeof r.chunksCount === 'number') setChunksCount(r.chunksCount);
+          if (typeof r.aiModel === 'string' || r.aiModel === null) setAiModel(r.aiModel ?? null);
+          if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
+          if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
+          if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
           await loadToday();
           await loadTotals();
           await loadTodayLive();
