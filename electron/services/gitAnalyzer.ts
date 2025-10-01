@@ -26,8 +26,10 @@ export class GitAnalyzer {
       if (!line.trim()) continue;
       const parts = line.split('\t');
       if (parts.length >= 3) {
-        const a = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-        const b = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        const aStr = parts[0] ?? '-';
+        const bStr = parts[1] ?? '-';
+        const a = aStr === '-' ? 0 : parseInt(aStr, 10) || 0;
+        const b = bStr === '-' ? 0 : parseInt(bStr, 10) || 0;
         ins += a; del += b;
       }
     }
@@ -37,8 +39,10 @@ export class GitAnalyzer {
       if (!line.trim()) continue;
       const parts = line.split('\t');
       if (parts.length >= 3) {
-        const a = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-        const b = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        const aStr = parts[0] ?? '-';
+        const bStr = parts[1] ?? '-';
+        const a = aStr === '-' ? 0 : parseInt(aStr, 10) || 0;
+        const b = bStr === '-' ? 0 : parseInt(bStr, 10) || 0;
         ins += a; del += b;
       }
     }
@@ -65,8 +69,10 @@ export class GitAnalyzer {
     for (const line of out.split('\n')) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 3) {
-        const ins = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-        const del = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        const aStr = parts[0] ?? '-';
+        const bStr = parts[1] ?? '-';
+        const ins = aStr === '-' ? 0 : parseInt(aStr, 10) || 0;
+        const del = bStr === '-' ? 0 : parseInt(bStr, 10) || 0;
         insertions += ins;
         deletions += del;
       }
@@ -81,8 +87,10 @@ export class GitAnalyzer {
     for (const line of out.split('\n')) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 3) {
-        const ins = parts[0] === '-' ? 0 : parseInt(parts[0], 10) || 0;
-        const del = parts[1] === '-' ? 0 : parseInt(parts[1], 10) || 0;
+        const aStr = parts[0] ?? '-';
+        const bStr = parts[1] ?? '-';
+        const ins = aStr === '-' ? 0 : parseInt(aStr, 10) || 0;
+        const del = bStr === '-' ? 0 : parseInt(bStr, 10) || 0;
         insertions += ins;
         deletions += del;
       }

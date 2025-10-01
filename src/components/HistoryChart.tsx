@@ -16,7 +16,6 @@ const HistoryChart: React.FC = () => {
   const [data, setData] = useState<{ timestamp: number; score: number }[]>([]);
 
   useEffect(() => {
-    // @ts-expect-error preload typed via global augmentation
     window.api?.getHistory().then((items: any[]) => setData(items || []));
   }, []);
 

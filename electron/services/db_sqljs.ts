@@ -1,7 +1,8 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import initSqlJs, { Database as SQLDatabase, SqlJsStatic } from 'sql.js';
+import initSqlJs from 'sql.js';
+import type { Database as SQLDatabase } from 'sql.js';
 
 export type DayRow = {
   date: string; // YYYY-MM-DD
@@ -25,8 +26,9 @@ export type DayRow = {
 };
 
 export class DB {
-  private sqlite!: SqlJsStatic;
-  private db!: SQLDatabase;
+  // Use broader types to avoid TS namespace typing issues across environments
+  private sqlite!: any;
+  private db!: any;
   private filePath: string;
   private ready: Promise<void>;
 
@@ -336,7 +338,7 @@ export class DB {
   }
 }
 
-function mapRow<T>(table: import('sql.js').QueryExecResult): T[] {
+function mapRow<T>(table: any): T[] {
   const cols = table.columns;
   return table.values.map((arr: unknown[]) => {
     const obj: Record<string, unknown> = {};
@@ -345,13 +347,13 @@ function mapRow<T>(table: import('sql.js').QueryExecResult): T[] {
   });
 }
 
-function pickAgg(res: import('sql.js').QueryExecResult[] | undefined) {
+function pickAgg(res: any[] | undefined) {
   if (!res || !res[0] || !res[0].values[0]) return { ins: 0, del: 0, score: 0 };
   const row = mapRow<any>(res[0])[0];
   return { ins: Math.round(row.ins || 0), del: Math.round(row.del || 0), score: Math.round(row.avgScore || 0) };
 }
 
-function upsertAgg(db: SQLDatabase, table: 'weeks'|'months'|'years', keyCol: string, key: string, ins: number, del: number, score: number, now: number) {
+function upsertAgg(db: any, table: 'weeks'|'months'|'years', keyCol: string, key: string, ins: number, del: number, score: number, now: number) {
   const exists = db.exec(`SELECT 1 FROM ${table} WHERE ${keyCol}='${key}' LIMIT 1`);
   if (!exists[0]) {
     db.run(`INSERT INTO ${table}(${keyCol}, insertions, deletions, baseScore, createdAt, updatedAt) VALUES(?,?,?,?,?,?)`, [key, ins, del, score, now, now]);

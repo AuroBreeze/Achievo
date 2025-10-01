@@ -21,4 +21,8 @@
     }
   },
   "include": ["src", "electron", "vite.config.ts"]
+,
+  "exclude": [
+    "electron/services/db.ts"
+  ]
 }

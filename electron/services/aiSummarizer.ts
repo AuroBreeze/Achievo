@@ -118,7 +118,9 @@ function splitUnifiedDiffIntoChunks(diffText: string, maxChars = 48000): string[
   const chunks: string[] = [];
   let current = '';
   for (let i = 0; i < parts.length; i++) {
-    const seg = (i === 0 && !parts[0].startsWith('diff --git ')) ? parts[0] : ('\n' + parts[i]);
+    const first = parts[0] ?? '';
+    const pi = parts[i] ?? '';
+    const seg = (i === 0 && !first.startsWith('diff --git ')) ? first : ('\n' + pi);
     if ((current + seg).length > maxChars && current) {
       chunks.push(current);
       current = seg;
@@ -157,7 +159,7 @@ function tryParseSummaryJson(text: string): { score_ai: number; markdown: string
   }
   // last resort: regex to capture "markdown":"..."
   const m1 = t.match(/"markdown"\s*:\s*"([\s\S]*?)"\s*(,|\})/);
-  if (m1) {
+  if (m1 && typeof m1[1] === 'string') {
     const md = m1[1].replace(/\\n/g,'\n').replace(/\\"/g,'"');
     return { score_ai: 0, markdown: md };
   }
@@ -218,7 +220,8 @@ export async function summarizeUnifiedDiffChunked(
   let totalTokens = 0;
   const t0 = Date.now();
   for (let idx = 0; idx < chunks.length; idx++) {
-    const part = chunks[idx].slice(0, 45000); // extra safety margin
+    const ci = chunks[idx] ?? '';
+    const part = ci.slice(0, 45000); // extra safety margin
     const user = `这是第 ${idx+1}/${chunks.length} 个分片的统一 diff，请针对该分片生成 JSON：\n` +
       `- score_ai: 0-100 的整数\n` +
       `- markdown: 中文 Markdown，聚焦该分片的关键变更点/价值与风险/后续建议\n` +

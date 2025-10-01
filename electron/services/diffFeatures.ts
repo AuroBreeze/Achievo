@@ -56,9 +56,9 @@ export function extractDiffFeatures(unifiedDiff: string): DiffFeatures {
     if (line.startsWith('diff --git')) {
       const m = line.match(/ a\/(.*?) b\/(.*)$/);
       if (m) {
-        currentFile = m[2];
-        files.add(currentFile);
-        const cls = classifyFile(currentFile);
+        currentFile = m[2] ?? null;
+        if (currentFile) files.add(currentFile);
+        const cls = currentFile ? classifyFile(currentFile) : { ext: '', isCode: false, isDoc: false, isTest: false, isConfig: false, isSecurity: false } as any;
         if (cls.isCode) { codeFiles++; languages[cls.ext] = (languages[cls.ext]||0) + 1; }
         if (cls.isDoc) docFiles++;
         if (cls.isTest) testFiles++;
@@ -96,7 +96,8 @@ export function extractDiffFeatures(unifiedDiff: string): DiffFeatures {
   // AST-based analysis on aggregated added snippets per JS/TS file
   try {
     for (const fpath of Object.keys(addedSnippets)) {
-      const joined = addedSnippets[fpath].join('\n');
+      const arr = addedSnippets[fpath] || [];
+      const joined = arr.join('\n');
       const m = analyzeJsTsSnippet(joined);
       jsFuncAdds += Math.max(0, m.functions || 0);
       jsClassAdds += Math.max(0, m.classes || 0);

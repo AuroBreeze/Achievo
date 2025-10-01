@@ -256,13 +256,16 @@ const Dashboard: React.FC = () => {
     start.setDate(end.getDate() - 29); // last 30 days inclusive
     const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const rows = await window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) });
-    const mapped = (rows||[]).map(r => ({
-      date: r.date,
-      baseScore: r.baseScore,
-      aiScore: (r as any).aiScore ?? null,
-      localScore: (r as any).localScore ?? null,
-      progressPercent: (r as any).progressPercent ?? null,
-    })).sort((a,b)=> a.date.localeCompare(b.date));
+    type RowIn = { date: string; baseScore: number; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null };
+    const mapped = ((rows || []) as RowIn[])
+      .map((r: RowIn) => ({
+        date: r.date,
+        baseScore: r.baseScore,
+        aiScore: (r as any).aiScore ?? null,
+        localScore: (r as any).localScore ?? null,
+        progressPercent: (r as any).progressPercent ?? null,
+      }))
+      .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
     setDaily(mapped);
   }, []);
 
@@ -323,7 +326,7 @@ const Dashboard: React.FC = () => {
       if (typeof sl === 'number') setScoreLocal(sl);
       if (typeof sa === 'number') setScoreAi(sa);
       if (typeof pp === 'number') setProgressPercent(pp);
-      if (typeof res.featuresSummary === 'string') setFeaturesSummary(res.featuresSummary);
+      if (res && typeof (res as any).featuresSummary === 'string') setFeaturesSummary((res as any).featuresSummary);
       await loadToday();
       await loadTotals();
       await loadTodayLive();
