@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
 import type { Database as SQLDatabase } from 'sql.js';
@@ -86,7 +87,14 @@ export class DB {
   private async init() {
     this.sqlite = await initSqlJs({
       locateFile: (file: string) => {
-        // Load from node_modules during dev/build
+        // Packaged: prefer unpacked resources; Dev: use project node_modules
+        if ((process as any).resourcesPath && app.isPackaged) {
+          const unpacked = path.join(process.resourcesPath as string, 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', file);
+          if (fsSync.existsSync(unpacked)) return unpacked;
+          const resAlt = path.join(process.resourcesPath as string, 'sql.js', 'dist', file);
+          if (fsSync.existsSync(resAlt)) return resAlt;
+        }
+        // Dev fallback
         return path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
       },
     });

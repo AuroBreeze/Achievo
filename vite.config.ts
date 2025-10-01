@@ -4,6 +4,8 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  // Use relative paths in production build so file:// loading works in Electron
+  base: './',
   server: {
     port: 5173,
     strictPort: true
