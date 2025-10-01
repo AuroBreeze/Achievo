@@ -17,6 +17,9 @@ const Settings: React.FC = () => {
   const [repoPath, setRepoPath] = useState('');
   const [intervalMs, setIntervalMs] = useState<number>(30000);
   const [quoteFontSize, setQuoteFontSize] = useState<number>(11);
+  const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
+  const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
+  const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState<TrackingStatus>({ running: false });
   const [busy, setBusy] = useState(false);
@@ -34,6 +37,12 @@ const Settings: React.FC = () => {
     if (typeof qfs === 'number' && !Number.isNaN(qfs)) {
       setQuoteFontSize(qfs);
     }
+    const qen = (cfg as any).quoteEnabled;
+    if (typeof qen === 'boolean') setQuoteEnabled(qen);
+    const qrs = (cfg as any).quoteRefreshSeconds;
+    if (typeof qrs === 'number' && qrs > 0) setQuoteRefreshSeconds(qrs);
+    const qls = (cfg as any).quoteLetterSpacing;
+    if (typeof qls === 'number') setQuoteLetterSpacing(qls);
     const st = await window.api.trackingStatus();
     setStatus(st);
   };
@@ -54,8 +63,15 @@ const Settings: React.FC = () => {
       aiApiKey,
       // cast to any to support newer fields in preload bridge
       quoteFontSize,
+      quoteEnabled,
+      quoteRefreshSeconds,
+      quoteLetterSpacing,
     } as any);
     setSaved('已保存');
+    // notify other parts to apply immediately
+    try {
+      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing } }));
+    } catch {}
     await refresh();
   };
 
@@ -128,9 +144,16 @@ const Settings: React.FC = () => {
       <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
         <header className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-100">显示设置</h3>
-          <span className="text-xs text-slate-400">一言（折叠侧边栏）字体</span>
+          <span className="text-xs text-slate-400">一言（折叠侧边栏）</span>
         </header>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">启用一言</label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-200">
+              <input type="checkbox" checked={quoteEnabled} onChange={e=>setQuoteEnabled(e.target.checked)} />
+              <span>{quoteEnabled ? '已启用' : '已关闭'}</span>
+            </label>
+          </div>
           <div>
             <label className="block text-xs text-slate-400 mb-1">一言字体大小（px）</label>
             <div className="flex items-center gap-2">
@@ -153,6 +176,56 @@ const Settings: React.FC = () => {
               <span className="text-xs text-slate-400">px</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">用于折叠侧边栏导轨的一言竖排文字大小。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">刷新频率（秒）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={30}
+                max={600}
+                value={quoteRefreshSeconds}
+                onChange={e=>setQuoteRefreshSeconds(parseInt(e.target.value)||60)}
+                className="flex-1"
+                disabled={!quoteEnabled}
+              />
+              <input
+                type="number"
+                min={30}
+                max={1200}
+                value={quoteRefreshSeconds}
+                onChange={e=>setQuoteRefreshSeconds(parseInt(e.target.value)||60)}
+                className="w-20 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+                disabled={!quoteEnabled}
+              />
+              <span className="text-xs text-slate-400">秒</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">仅在侧边栏折叠时生效；过低的频率可能触发速率限制。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">一言字间距（px）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={-1}
+                max={6}
+                step={0.5}
+                value={quoteLetterSpacing}
+                onChange={e=>setQuoteLetterSpacing(parseFloat(e.target.value))}
+                className="flex-1"
+              />
+              <input
+                type="number"
+                min={-2}
+                max={10}
+                step={0.5}
+                value={quoteLetterSpacing}
+                onChange={e=>setQuoteLetterSpacing(parseFloat(e.target.value))}
+                className="w-20 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
+              <span className="text-xs text-slate-400">px</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">竖排时每个字之间的额外间距，支持负值。</p>
           </div>
         </div>
       </section>

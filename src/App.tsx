@@ -12,6 +12,9 @@ function App() {
   const [quoteFrom, setQuoteFrom] = useState<string>('');
   const [quoteProvider, setQuoteProvider] = useState<'yiyan' | 'hitokoto' | 'quotable' | 'local' | ''>('');
   const [quoteFontSize, setQuoteFontSize] = useState<number>(11);
+  const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
+  const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
+  const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   // debounced hover control to make sidebar open/close smoother
   const openTimer = React.useRef<number | null>(null);
   const closeTimer = React.useRef<number | null>(null);
@@ -43,8 +46,27 @@ function App() {
         const cfg = await window.api?.getConfig?.();
         const qfs = (cfg as any)?.quoteFontSize;
         if (typeof qfs === 'number' && !Number.isNaN(qfs)) setQuoteFontSize(qfs);
+        const qen = (cfg as any)?.quoteEnabled;
+        if (typeof qen === 'boolean') setQuoteEnabled(qen);
+        const qrs = (cfg as any)?.quoteRefreshSeconds;
+        if (typeof qrs === 'number' && qrs > 0) setQuoteRefreshSeconds(qrs);
+        const qls = (cfg as any)?.quoteLetterSpacing;
+        if (typeof qls === 'number') setQuoteLetterSpacing(qls);
       } catch {}
     })();
+  }, []);
+
+  // respond immediately to Settings changes
+  useEffect(() => {
+    const handler = (e: any) => {
+      const d = e?.detail || {};
+      if (typeof d.quoteFontSize === 'number' && !Number.isNaN(d.quoteFontSize)) setQuoteFontSize(d.quoteFontSize);
+      if (typeof d.quoteEnabled === 'boolean') setQuoteEnabled(d.quoteEnabled);
+      if (typeof d.quoteRefreshSeconds === 'number' && d.quoteRefreshSeconds > 0) setQuoteRefreshSeconds(d.quoteRefreshSeconds);
+      if (typeof d.quoteLetterSpacing === 'number') setQuoteLetterSpacing(d.quoteLetterSpacing);
+    };
+    window.addEventListener('config:updated' as any, handler);
+    return () => window.removeEventListener('config:updated' as any, handler);
   }, []);
 
   // fetch a short quote with timeouts and robust fallbacks
@@ -115,12 +137,13 @@ function App() {
   useEffect(() => { fetchQuote(); }, []);
   useEffect(() => {
     let timer: number | null = null;
-    if (!sidebarOpen) {
+    if (quoteEnabled && !sidebarOpen) {
       if (!quote) fetchQuote();
-      timer = window.setInterval(fetchQuote, 60000);
+      const ms = Math.max(10, Number(quoteRefreshSeconds) || 60) * 1000;
+      timer = window.setInterval(fetchQuote, ms);
     }
     return () => { if (timer) clearInterval(timer); };
-  }, [sidebarOpen]);
+  }, [quoteEnabled, sidebarOpen, quoteRefreshSeconds]);
 
   const Icon = ({ name }: { name: 'dashboard'|'history'|'settings' }) => {
     const common = 'w-4 h-4';
@@ -225,19 +248,23 @@ function App() {
                 <svg className="w-4 h-4 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M9 6l6 6-6 6"/></svg>
               </button>
               {/* Quote inline on the rail (vertical) */}
-              <div className="flex-1 w-full px-1 flex items-center justify-center select-text" onMouseEnter={() => { if (!quote) fetchQuote(); }}>
-                <button
-                  className="w-full h-full leading-4 text-slate-200/90 hover:text-slate-100"
-                  style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: quoteFontSize }}
-                  title={quoteFrom ? `${quote}\n— ${quoteFrom}` : quote}
-                  onClick={() => { try { navigator.clipboard?.writeText(quote ? `${quote}${quoteFrom ? ` — ${quoteFrom}` : ''}` : ''); } catch {} }}
-                >
-                  {quote || '…'}
-                </button>
-              </div>
+              {quoteEnabled ? (
+                <div className="flex-1 w-full px-1 flex items-center justify-center select-text" onMouseEnter={() => { if (!quote) fetchQuote(); }}>
+                  <button
+                    className="w-full h-full leading-4 text-slate-200/90 hover:text-slate-100"
+                    style={{ writingMode: 'vertical-rl', textOrientation: 'upright', fontSize: quoteFontSize, letterSpacing: `${quoteLetterSpacing}px` }}
+                    title={quoteFrom ? `${quote}\n— ${quoteFrom}` : quote}
+                    onClick={() => { try { navigator.clipboard?.writeText(quote ? `${quote}${quoteFrom ? ` — ${quoteFrom}` : ''}` : ''); } catch {} }}
+                  >
+                    {quote || '…'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1" />
+              )}
               <div className="flex flex-col items-center gap-1">
-                <div className="text-[10px] text-slate-500 rotate-180 writing-mode-vertical-lr" style={{ writingMode: 'vertical-rl' }}>{quoteProvider === 'yiyan' ? '一言' : quoteProvider === 'hitokoto' ? '一言' : quoteProvider === 'quotable' ? 'Quote' : quoteProvider === 'local' ? '本地' : '...'}</div>
-                <button className="w-6 h-6 rounded bg-slate-700/60 hover:bg-slate-700 border border-slate-600 text-slate-200" title="换一条" onClick={fetchQuote}>
+                <div className="text-[10px] text-slate-500 rotate-180 writing-mode-vertical-lr" style={{ writingMode: 'vertical-rl' }}>{quoteEnabled ? (quoteProvider === 'yiyan' ? '一言' : quoteProvider === 'hitokoto' ? '一言' : quoteProvider === 'quotable' ? 'Quote' : quoteProvider === 'local' ? '本地' : '...') : '已关闭'}</div>
+                <button className="w-6 h-6 rounded bg-slate-700/60 hover:bg-slate-700 border border-slate-600 text-slate-200 disabled:opacity-50" title="换一条" onClick={fetchQuote} disabled={!quoteEnabled}>
                   <svg className="w-3 h-3 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4v6h6M20 20v-6h-6"/><path d="M20 8A8 8 0 0 0 4 8m16 8a8 8 0 0 1-16 0"/></svg>
                 </button>
               </div>
