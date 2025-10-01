@@ -18,6 +18,20 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
+// Format large numbers: >=10,000 => W unit; >=1,000 => K unit
+function formatCompact(value: number): string {
+  const n = Math.abs(value);
+  if (n >= 10000) {
+    const v = +(value / 10000).toFixed(1);
+    return `${v}${'W'}`;
+  }
+  if (n >= 1000) {
+    const v = +(value / 1000).toFixed(1);
+    return `${v}${'K'}`;
+  }
+  return String(value);
+}
+
 // Helper: greedily extract the first balanced JSON object from a string
 function extractFirstJsonObject(text: string): string | null {
   const s = String(text);
@@ -82,7 +96,8 @@ const StatValue: React.FC<{ value: React.ReactNode }> = ({ value }) => {
   if (value === null || value === undefined || value === '-') {
     return <div className="h-6 w-16 rounded bg-slate-700/60 animate-pulse" />;
   }
-  return <div className="text-2xl font-semibold">{value}</div>;
+  const rendered = typeof value === 'number' ? formatCompact(value) : value;
+  return <div className="text-2xl font-semibold">{rendered}</div>;
 };
 
 // Lazy mount helpers
@@ -319,7 +334,7 @@ const Dashboard: React.FC = () => {
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="total" /> 总改动数</div>
           <StatValue value={totals?.total ?? '-'} />
-          <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
+          <div className="text-xs opacity-70 mt-1">新增 {typeof totals?.insertions === 'number' ? formatCompact(totals.insertions) : 0} · 删除 {typeof totals?.deletions === 'number' ? formatCompact(totals.deletions) : 0}</div>
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="local" /> 本地进步分</div>
