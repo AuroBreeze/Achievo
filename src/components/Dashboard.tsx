@@ -380,7 +380,15 @@ const Dashboard: React.FC = () => {
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="total" /> 总改动数</div>
           <StatValue value={totals?.total ?? '-'} />
-          <div className="text-xs opacity-70 mt-1">新增 {typeof totals?.insertions === 'number' ? formatCompact(totals.insertions) : 0} · 删除 {typeof totals?.deletions === 'number' ? formatCompact(totals.deletions) : 0}</div>
+          {(() => {
+            // 对齐“今日新增/今日删除”口径，使用今日实时计数显示细分
+            const insToday = (todayLive?.insertions ?? today?.insertions) ?? 0;
+            const delToday = (todayLive?.deletions ?? today?.deletions) ?? 0;
+            const totalToday = (typeof insToday === 'number' ? insToday : 0) + (typeof delToday === 'number' ? delToday : 0);
+            return (
+              <div className="text-xs opacity-70 mt-1">新增 {formatCompact(totalToday)}</div>
+            );
+          })()}
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="local" /> 本地进步分</div>

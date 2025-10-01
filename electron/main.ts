@@ -481,7 +481,8 @@ ipcMain.handle('stats:getTodayLive', async () => {
       }
     } catch {}
   } catch {}
-  return { date: today, insertions: ns.insertions, deletions: ns.deletions };
+  const total = Math.max(0, (ns.insertions || 0)) + Math.max(0, (ns.deletions || 0));
+  return { date: today, insertions: ns.insertions, deletions: ns.deletions, total };
 });
 
 // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
