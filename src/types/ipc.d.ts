@@ -5,8 +5,8 @@ declare global {
     api?: {
       analyzeDiff(payload: { before: string; after: string }): Promise<{ score: number; summary: string }>;
       getHistory(): Promise<{ timestamp: number; score: number; summary: string }[]>;
-      getConfig(): Promise<{ openaiApiKey?: string; repoPath?: string; lastProcessedCommit?: string | null; lastSummaryDate?: string | null; aiProvider?: 'openai' | 'deepseek' | 'custom'; aiModel?: string; aiBaseUrl?: string; aiApiKey?: string }>; 
-      setConfig(cfg: { openaiApiKey?: string; repoPath?: string; lastProcessedCommit?: string | null; lastSummaryDate?: string | null; aiProvider?: 'openai' | 'deepseek' | 'custom'; aiModel?: string; aiBaseUrl?: string; aiApiKey?: string }): Promise<void>;
+      getConfig(): Promise<{ openaiApiKey?: string; repoPath?: string; lastProcessedCommit?: string | null; lastSummaryDate?: string | null; aiProvider?: 'openai' | 'deepseek' | 'custom'; aiModel?: string; aiBaseUrl?: string; aiApiKey?: string; quoteFontSize?: number }>; 
+      setConfig(cfg: { openaiApiKey?: string; repoPath?: string; lastProcessedCommit?: string | null; lastSummaryDate?: string | null; aiProvider?: 'openai' | 'deepseek' | 'custom'; aiModel?: string; aiBaseUrl?: string; aiApiKey?: string; quoteFontSize?: number }): Promise<void>;
       selectFolder(): Promise<{ canceled: boolean; path?: string }>;
       trackingStart(payload: { repoPath?: string; intervalMs?: number }): Promise<{ running: boolean; repoPath?: string; intervalMs?: number; lastProcessedCommit?: string | null; lastError?: string | null }>;
       trackingStop(): Promise<{ running: boolean; repoPath?: string; intervalMs?: number; lastProcessedCommit?: string | null; lastError?: string | null }>;

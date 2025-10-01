@@ -16,6 +16,7 @@ const Settings: React.FC = () => {
   const [aiApiKey, setAiApiKey] = useState('');
   const [repoPath, setRepoPath] = useState('');
   const [intervalMs, setIntervalMs] = useState<number>(30000);
+  const [quoteFontSize, setQuoteFontSize] = useState<number>(11);
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState<TrackingStatus>({ running: false });
   const [busy, setBusy] = useState(false);
@@ -29,6 +30,10 @@ const Settings: React.FC = () => {
     setAiModel(cfg.aiModel ?? (cfg.aiProvider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'));
     setAiBaseUrl(cfg.aiBaseUrl ?? '');
     setAiApiKey(cfg.aiApiKey ?? '');
+    const qfs = (cfg as any).quoteFontSize;
+    if (typeof qfs === 'number' && !Number.isNaN(qfs)) {
+      setQuoteFontSize(qfs);
+    }
     const st = await window.api.trackingStatus();
     setStatus(st);
   };
@@ -47,7 +52,9 @@ const Settings: React.FC = () => {
       aiModel,
       aiBaseUrl,
       aiApiKey,
-    });
+      // cast to any to support newer fields in preload bridge
+      quoteFontSize,
+    } as any);
     setSaved('已保存');
     await refresh();
   };
@@ -117,6 +124,38 @@ const Settings: React.FC = () => {
       </section>
 
       {/* Card: 仓库路径与跟踪 */}
+      {/* Card: 显示设置 */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">显示设置</h3>
+          <span className="text-xs text-slate-400">一言（折叠侧边栏）字体</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">一言字体大小（px）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={9}
+                max={16}
+                value={quoteFontSize}
+                onChange={e=>setQuoteFontSize(parseInt(e.target.value)||11)}
+                className="flex-1"
+              />
+              <input
+                type="number"
+                min={8}
+                max={24}
+                value={quoteFontSize}
+                onChange={e=>setQuoteFontSize(parseInt(e.target.value)||11)}
+                className="w-20 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
+              <span className="text-xs text-slate-400">px</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">用于折叠侧边栏导轨的一言竖排文字大小。</p>
+          </div>
+        </div>
+      </section>
       <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
         <header className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-slate-100">跟踪的仓库</h3>
