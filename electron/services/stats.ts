@@ -64,19 +64,27 @@ export class StatsService {
     );
 
     // Save summary to today's row
+    // If AI returns JSON, extract markdown field; otherwise keep raw text
+    let toSave = text;
+    try {
+      const obj = JSON.parse(text);
+      const md = obj?.markdown ?? obj?.summary ?? obj?.text;
+      if (typeof md === 'string' && md.trim()) toSave = md;
+    } catch {}
+
     const existingToday = await this.db.getDay(today);
-    if (existingToday) await this.db.setDaySummary(today, text);
+    if (existingToday) await this.db.setDaySummary(today, toSave);
     else {
       // ensure there's at least an empty row to attach summary
       await this.db.upsertDayAccumulate(today, 0, 0);
-      await this.db.setDaySummary(today, text);
+      await this.db.setDaySummary(today, toSave);
     }
 
     // Update lastSummaryDate
     cfg.lastSummaryDate = today;
     await setConfig(cfg);
 
-    return { date: today, summary: text };
+    return { date: today, summary: toSave };
   }
 }
 

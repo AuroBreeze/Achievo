@@ -44,7 +44,18 @@ const Dashboard: React.FC = () => {
     else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
     if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
     // show persisted markdown immediately if no local text yet
-    if (!todayText && typeof t?.summary === 'string') setTodayText(t.summary);
+    if (!todayText && typeof t?.summary === 'string') {
+      let s = t.summary;
+      // If DB stored a JSON blob previously, extract markdown
+      if (/^\s*\{[\s\S]*\}\s*$/.test(s)) {
+        try {
+          const obj = JSON.parse(s);
+          const md = obj?.markdown ?? obj?.summary ?? obj?.text;
+          if (typeof md === 'string' && md.trim()) s = md;
+        } catch {}
+      }
+      setTodayText(s);
+    }
   };
 
   const loadTotals = async () => {
@@ -97,10 +108,19 @@ const Dashboard: React.FC = () => {
     try {
       await window.api.trackingAnalyzeOnce({});
       const res = await window.api.summaryTodayDiff();
-      setTodayText(res.summary || '（无内容）');
-      if (typeof res.scoreLocal === 'number') setScoreLocal(res.scoreLocal);
-      if (typeof res.scoreAi === 'number') setScoreAi(res.scoreAi);
-      if (typeof res.progressPercent === 'number') setProgressPercent(res.progressPercent);
+      // Be resilient to different key styles from backend or model output
+      const anyRes: any = res as any;
+      const md = (anyRes.summary ?? anyRes.markdown ?? '（无内容）');
+      setTodayText(String(md));
+      const sl = (typeof anyRes.scoreLocal === 'number') ? anyRes.scoreLocal :
+                 (typeof anyRes.score_local === 'number') ? anyRes.score_local : undefined;
+      const sa = (typeof anyRes.scoreAi === 'number') ? anyRes.scoreAi :
+                 (typeof anyRes.score_ai === 'number') ? anyRes.score_ai : undefined;
+      const pp = (typeof anyRes.progressPercent === 'number') ? anyRes.progressPercent :
+                 (typeof anyRes.progress_percent === 'number') ? anyRes.progress_percent : undefined;
+      if (typeof sl === 'number') setScoreLocal(sl);
+      if (typeof sa === 'number') setScoreAi(sa);
+      if (typeof pp === 'number') setProgressPercent(pp);
       if (typeof res.featuresSummary === 'string') setFeaturesSummary(res.featuresSummary);
       await loadToday();
       await loadTotals();
@@ -158,18 +178,39 @@ const Dashboard: React.FC = () => {
       </section>
       <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
         <h3 className="font-medium">AI 总结</h3>
-        <div className="prose prose-invert max-w-none mt-2 text-slate-200">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            rehypePlugins={[
-              rehypeSlug,
-              [rehypeAutolinkHeadings, { behavior: 'wrap' }],
-              [rehypeHighlight, { ignoreMissing: true }],
-            ]}
-          >
-            {todayText || today?.summary || '—'}
-          </ReactMarkdown>
-        </div>
+        {(() => {
+          const raw = (todayText || today?.summary || '').toString();
+          let mdSource = raw;
+          // At render time, also guard against JSON-shaped strings
+          if (/^\s*\{[\s\S]*\}\s*$/.test(raw)) {
+            try {
+              const obj = JSON.parse(raw);
+              const md = obj?.markdown ?? obj?.summary ?? obj?.text;
+              if (typeof md === 'string' && md.trim()) mdSource = md;
+            } catch {}
+          }
+          const preview = mdSource.slice(0, 120).replace(/\s+/g, ' ').trim();
+          return (
+            <div className="prose prose-invert max-w-none mt-2 text-slate-200">
+              <div className="text-xs text-slate-400 mb-2">{`长度: ${mdSource.length}${preview ? ` · 预览: ${preview}...` : ''}`}</div>
+              {mdSource.trim() ? (
+                <ReactMarkdown
+                  key={`md-${mdSource.length}`}
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  rehypePlugins={[
+                    rehypeSlug,
+                    [rehypeAutolinkHeadings, { behavior: 'wrap' }],
+                    [rehypeHighlight, { ignoreMissing: true }],
+                  ]}
+                >
+                  {mdSource}
+                </ReactMarkdown>
+              ) : (
+                <div className="text-slate-400">暂无总结</div>
+              )}
+            </div>
+          );
+        })()}
       </section>
       {/* History chart inside dashboard */}
       <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
