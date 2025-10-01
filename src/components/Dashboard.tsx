@@ -28,7 +28,6 @@ const Dashboard: React.FC = () => {
   const [diffText, setDiffText] = useState('');
   const [totals, setTotals] = useState<{ insertions: number; deletions: number; total: number } | null>(null);
   const [todayLive, setTodayLive] = useState<{ date: string; insertions: number; deletions: number } | null>(null);
-  const [history, setHistory] = useState<{ timestamp: number; score: number }[]>([]);
   const [scoreLocal, setScoreLocal] = useState<number | null>(null);
   const [scoreAi, setScoreAi] = useState<number | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
@@ -96,14 +95,12 @@ const Dashboard: React.FC = () => {
     loadToday();
     loadTotals();
     loadTodayLive();
-    // load history for chart
-    window.api?.getHistory?.().then((items: any[]) => setHistory((items||[]).map(i => ({ timestamp: i.timestamp, score: i.score }))));
-    // load last 30 days daily metrics
+    // Daily charts can load in background
     (async () => {
       if (!window.api?.statsGetRange) return;
       const end = new Date();
       const start = new Date();
-      start.setDate(end.getDate() - 29);
+      start.setDate(end.getDate() - 29); // load last 30 days daily metrics (inclusive)
       const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       const rows = await window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) });
       const mapped = (rows||[]).map(r => ({
@@ -273,17 +270,7 @@ const Dashboard: React.FC = () => {
           );
         })()}
       </section>
-      {/* History chart inside dashboard */}
-      <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
-        <h3 className="font-medium mb-2">历史分数</h3>
-        <Line
-          data={{
-            labels: history.map(d => new Date(d.timestamp).toLocaleString()),
-            datasets: [{ label: '进步分数', data: history.map(d => d.score), borderColor: '#4f46e5' }],
-          }}
-          options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
-        />
-      </section>
+      {/* 历史分数图已移除 */}
       {diffOpen && (
         <section className="lg:col-span-2 bg-slate-900 rounded border border-slate-800 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
