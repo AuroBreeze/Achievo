@@ -65,50 +65,87 @@ const Settings: React.FC = () => {
   // 设置页面仅用于配置与保存
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div className="space-y-2">
-        <div className="font-medium">AI 提供商与模型</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+    <div className="max-w-3xl space-y-6">
+      {/* Card: AI 提供商与模型 */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">AI 提供商与模型</h3>
+          <span className="text-xs text-slate-400">用于生成总结与评分</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm">提供商</label>
-            <select value={aiProvider} onChange={e=>setAiProvider(e.target.value as any)} className="w-full bg-slate-800 rounded p-2">
+            <label className="block text-xs text-slate-400 mb-1">提供商</label>
+            <select
+              value={aiProvider}
+              onChange={e=>setAiProvider(e.target.value as any)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
               <option value="openai">OpenAI</option>
               <option value="deepseek">DeepSeek</option>
               <option value="custom">自定义</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm">模型</label>
-            <input value={aiModel} onChange={e=>setAiModel(e.target.value)} className="w-full bg-slate-800 rounded p-2" placeholder={aiProvider==='deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'} />
+            <label className="block text-xs text-slate-400 mb-1">模型</label>
+            <input
+              value={aiModel}
+              onChange={e=>setAiModel(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder={aiProvider==='deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'}
+            />
           </div>
           <div>
-            <label className="block text-sm">Base URL（DeepSeek/自定义）</label>
-            <input value={aiBaseUrl} onChange={e=>setAiBaseUrl(e.target.value)} className="w-full bg-slate-800 rounded p-2" placeholder={aiProvider==='deepseek' ? 'https://api.deepseek.com' : 'https://your.api/base'} />
+            <label className="block text-xs text-slate-400 mb-1">Base URL（DeepSeek/自定义）</label>
+            <input
+              value={aiBaseUrl}
+              onChange={e=>setAiBaseUrl(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder={aiProvider==='deepseek' ? 'https://api.deepseek.com' : 'https://your.api/base'}
+            />
           </div>
           <div>
-            <label className="block text-sm">AI API Key（优先使用）</label>
-            <input value={aiApiKey} onChange={e=>setAiApiKey(e.target.value)} className="w-full bg-slate-800 rounded p-2" placeholder={aiProvider==='deepseek' ? 'sk-...' : 'sk-...'} />
+            <label className="block text-xs text-slate-400 mb-1">AI API Key（优先使用）</label>
+            <input
+              value={aiApiKey}
+              onChange={e=>setAiApiKey(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder={aiProvider==='deepseek' ? 'sk-...' : 'sk-...'}
+            />
           </div>
         </div>
-        <p className="text-xs opacity-70">备注：若未填 AI API Key，将回退到 OpenAI API Key，再回退到环境变量 OPENAI_API_KEY。</p>
-      </div>
+        <p className="text-xs text-slate-400 mt-2">备注：若未填 AI API Key，将回退到 OpenAI API Key，再回退到环境变量 OPENAI_API_KEY。</p>
+      </section>
 
-      <div className="space-y-2">
-        <label className="block text-sm">跟踪的文件夹（Git 仓库根目录）</label>
+      {/* Card: 仓库路径与跟踪 */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">跟踪的仓库</h3>
+          <span className="text-xs text-slate-400">Git 仓库根目录</span>
+        </header>
         <div className="flex gap-2">
-          <input value={repoPath} onChange={e=>setRepoPath(e.target.value)} className="flex-1 bg-slate-800 rounded p-2" placeholder="d:/code/project" />
-          <button onClick={selectFolder} className="px-3 py-1 rounded bg-slate-700">选择文件夹</button>
+          <input
+            value={repoPath}
+            onChange={e=>setRepoPath(e.target.value)}
+            className="flex-1 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            placeholder="d:/code/project"
+          />
+          <button
+            onClick={selectFolder}
+            className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+          >选择文件夹</button>
         </div>
-      </div>
+      </section>
 
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <button onClick={save} className="px-3 py-1 rounded bg-indigo-600">保存设置</button>
-          {saved && <span className="text-green-400">{saved}</span>}
+      {/* Card: 操作 */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={save}
+            className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white shadow border border-indigo-500/60 transition-colors"
+          >保存设置</button>
+          {saved && <span className="text-green-400 text-sm">{saved}</span>}
         </div>
-
-        {/* 设置页不再展示手动分析结果 */}
-      </div>
+      </section>
     </div>
   );
 };

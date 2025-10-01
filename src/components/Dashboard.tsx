@@ -188,36 +188,36 @@ const Dashboard: React.FC = () => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <section className="lg:col-span-2 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm opacity-75">今日新增</div>
           <div className="text-2xl font-semibold">{(todayLive?.insertions ?? today?.insertions) ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm opacity-75">今日删除</div>
           <div className="text-2xl font-semibold">{(todayLive?.deletions ?? today?.deletions) ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm opacity-75">基础分</div>
           <div className="text-2xl font-semibold">{today?.baseScore ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm opacity-75">趋势(较昨日)</div>
           <div className={`text-2xl font-semibold ${((today?.trend||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{today?.trend ?? '-'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm opacity-75">总改动数</div>
           <div className="text-2xl font-semibold">{totals?.total ?? '-'}</div>
           <div className="text-xs opacity-70 mt-1">新增 {totals?.insertions ?? 0} · 删除 {totals?.deletions ?? 0}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">本地进步分</div>
           <div className="text-2xl font-semibold">{scoreLocal ?? '—'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">AI 进步分</div>
           <div className="text-2xl font-semibold">{scoreAi ?? '—'}</div>
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700" title={featuresSummary || ''}>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={featuresSummary || ''}>
           <div className="text-sm opacity-75">进步百分比</div>
           <div className={`text-2xl font-semibold ${((progressPercent||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{
             (progressPercent !== null && progressPercent !== undefined) ? `${progressPercent}%` : '—'
@@ -226,8 +226,8 @@ const Dashboard: React.FC = () => {
       </section>
       {/* Per-day metrics charts */}
       <section className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
-          <h3 className="font-medium mb-2">基础分（按天）</h3>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+          <h3 className="text-sm font-semibold text-slate-100 mb-2">基础分（按天）</h3>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -236,8 +236,8 @@ const Dashboard: React.FC = () => {
             options={{ responsive: true, scales: { y: { beginAtZero: true } } }}
           />
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
-          <h3 className="font-medium mb-2">本地进步分（按天）</h3>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+          <h3 className="text-sm font-semibold text-slate-100 mb-2">本地进步分（按天）</h3>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -246,8 +246,8 @@ const Dashboard: React.FC = () => {
             options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
           />
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
-          <h3 className="font-medium mb-2">AI 进步分（按天）</h3>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+          <h3 className="text-sm font-semibold text-slate-100 mb-2">AI 进步分（按天）</h3>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -256,8 +256,8 @@ const Dashboard: React.FC = () => {
             options={{ responsive: true, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }}
           />
         </div>
-        <div className="bg-slate-800 rounded p-4 border border-slate-700">
-          <h3 className="font-medium mb-2">进步百分比（按天）</h3>
+        <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+          <h3 className="text-sm font-semibold text-slate-100 mb-2">进步百分比（按天）</h3>
           <Line
             data={{
               labels: daily.map(d => d.date),
@@ -268,12 +268,19 @@ const Dashboard: React.FC = () => {
         </div>
       </section>
       <section className="lg:col-span-2 flex items-center gap-2">
-        <button onClick={generateTodaySummary} disabled={todayBusy} className="px-4 py-2 rounded bg-indigo-600 disabled:opacity-60">{todayBusy ? '生成中…' : '生成今日总结'}</button>
-        <button onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }} className="px-4 py-2 rounded bg-slate-700">{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
+        <button
+          onClick={generateTodaySummary}
+          disabled={todayBusy}
+          className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 disabled:opacity-60"
+        >{todayBusy ? '生成中…' : '生成今日总结'}</button>
+        <button
+          onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }}
+          className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
+        >{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
       </section>
-      <section className="lg:col-span-2 bg-slate-800 rounded p-4 border border-slate-700">
-        <h3 className="font-medium">AI 总结</h3>
+      <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+        <h3 className="text-sm font-semibold text-slate-100">AI 总结</h3>
         {(() => {
           const raw = (todayText || today?.summary || '').toString();
           let mdSource = raw;
