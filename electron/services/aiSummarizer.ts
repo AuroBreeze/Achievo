@@ -55,11 +55,11 @@ function extractFirstJsonObject(s: string): string | null {
 export async function summarizeUnifiedDiff(
   diffText: string,
   ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures }
-): Promise<string> {
+): Promise<{ text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number }> {
   // Quick local heuristic: only short-circuit when truly empty
   try {
     const trimmed = diffText.trim();
-    if (!trimmed) return JSON.stringify({ score: 0, markdown: '今日无代码改动' });
+    if (!trimmed) return { text: JSON.stringify({ score: 0, markdown: '今日无代码改动' }), model: undefined, provider: undefined, tokens: 0, durationMs: 0, chunksCount: 0 };
     // If there is at least a diff header, proceed to AI summary regardless of +/- counts
     if (!trimmed.includes('diff --git')) {
       // Fallback check for any +/- lines excluding headers
@@ -69,7 +69,7 @@ export async function summarizeUnifiedDiff(
         if (l.startsWith('+++') || l.startsWith('---') || l.startsWith('@@')) continue;
         if (l.startsWith('+') || l.startsWith('-')) { signal = true; break; }
       }
-      if (!signal) return JSON.stringify({ score: 0, markdown: '今日无代码改动' });
+      if (!signal) return { text: JSON.stringify({ score: 0, markdown: '今日无代码改动' }), model: undefined, provider: undefined, tokens: 0, durationMs: 0, chunksCount: 0 };
     }
   } catch {}
 
@@ -97,6 +97,7 @@ export async function summarizeUnifiedDiff(
     `---\n` +
     snippet;
 
+  const started = Date.now();
   const resp = await client.chat.completions.create({
     model,
     messages: [
@@ -105,8 +106,10 @@ export async function summarizeUnifiedDiff(
     ],
     temperature: 0.2,
   });
-  const text2 = resp.choices?.[0]?.message?.content?.trim();
-  return text2 || '（无内容）';
+  const durationMs = Date.now() - started;
+  const text2 = resp.choices?.[0]?.message?.content?.trim() || '（无内容）';
+  const tokens = (resp as any)?.usage?.total_tokens ?? undefined;
+  return { text: text2, model: (resp as any)?.model || model, provider, tokens, durationMs, chunksCount: 1 };
 }
 
 // Split unified diff by file sections (diff --git ...) into size-bounded chunks
@@ -186,9 +189,9 @@ function replaceJsonFencesWithMarkdown(md: string): string {
 export async function summarizeUnifiedDiffChunked(
   diffText: string,
   ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures }
-): Promise<string> {
+): Promise<{ text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number }> {
   const trimmed = (diffText || '').trim();
-  if (!trimmed) return JSON.stringify({ score_ai: 0, markdown: '今日无代码改动' });
+  if (!trimmed) return { text: JSON.stringify({ score_ai: 0, markdown: '今日无代码改动' }), model: undefined, provider: undefined, tokens: 0, durationMs: 0, chunksCount: 0 };
 
   // If small enough, reuse single-shot path
   if (trimmed.length <= 60000) {
@@ -212,6 +215,8 @@ export async function summarizeUnifiedDiffChunked(
   const metrics = `提供的参考指标：新增行=${ctx?.insertions ?? '未知'}，删除行=${ctx?.deletions ?? '未知'}，本地分数(localScore)=${ctx?.localScore ?? '未知'}，昨日基准(prevBase)=${ctx?.prevBaseScore ?? '未知'}。${featuresCompact}`;
 
   const partials: { score_ai: number; markdown: string }[] = [];
+  let totalTokens = 0;
+  const t0 = Date.now();
   for (let idx = 0; idx < chunks.length; idx++) {
     const part = chunks[idx].slice(0, 45000); // extra safety margin
     const user = `这是第 ${idx+1}/${chunks.length} 个分片的统一 diff，请针对该分片生成 JSON：\n` +
@@ -227,6 +232,7 @@ export async function summarizeUnifiedDiffChunked(
       temperature: 0.2,
     });
     const txt = resp.choices?.[0]?.message?.content?.trim() || '';
+    const tk = (resp as any)?.usage?.total_tokens ?? 0; totalTokens += (typeof tk === 'number' ? tk : 0);
     const parsed = tryParseSummaryJson(txt);
     if (parsed) partials.push(parsed);
     else {
@@ -254,5 +260,6 @@ export async function summarizeUnifiedDiffChunked(
   if (combinedMd.includes('```')) combinedMd = replaceJsonFencesWithMarkdown(combinedMd);
   const header = `# 今日改动总结（分片合并）\n\n`;
   const finalMd = header + combinedMd;
-  return JSON.stringify({ score_ai: scoreAvg, markdown: finalMd });
+  const durationMs = Date.now() - t0;
+  return { text: JSON.stringify({ score_ai: scoreAvg, markdown: finalMd }), model, provider, tokens: totalTokens, durationMs, chunksCount: chunks.length };
 }

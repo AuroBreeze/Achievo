@@ -13,6 +13,13 @@ export type DayRow = {
   aiScore?: number | null;
   localScore?: number | null;
   progressPercent?: number | null;
+  // meta
+  aiModel?: string | null;
+  aiProvider?: string | null;
+  aiTokens?: number | null; // total tokens
+  aiDurationMs?: number | null; // total duration for summary generation
+  chunksCount?: number | null;
+  lastGenAt?: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -26,6 +33,21 @@ export class DB {
   constructor() {
     this.filePath = path.join(app.getPath('userData'), 'achievo.sqljs');
     this.ready = this.init();
+  }
+
+  async setDayAiMeta(date: string, meta: { aiModel?: string | null; aiProvider?: string | null; aiTokens?: number | null; aiDurationMs?: number | null; chunksCount?: number | null; lastGenAt?: number | null }) {
+    await this.ready;
+    const now = Date.now();
+    const row = await this.getDay(date);
+    if (!row) return;
+    const model = meta.aiModel ?? row.aiModel ?? null;
+    const provider = meta.aiProvider ?? row.aiProvider ?? null;
+    const tokens = (typeof meta.aiTokens === 'number') ? meta.aiTokens : (row.aiTokens ?? null);
+    const dur = (typeof meta.aiDurationMs === 'number') ? meta.aiDurationMs : (row.aiDurationMs ?? null);
+    const chunks = (typeof meta.chunksCount === 'number') ? meta.chunksCount : (row.chunksCount ?? null);
+    const genAt = (typeof meta.lastGenAt === 'number') ? meta.lastGenAt : (row.lastGenAt ?? null);
+    this.db.run(`UPDATE days SET aiModel=?, aiProvider=?, aiTokens=?, aiDurationMs=?, chunksCount=?, lastGenAt=?, updatedAt=? WHERE date=?`, [model, provider, tokens, dur, chunks, genAt, now, date]);
+    await this.persist();
   }
 
   async setDayCounts(date: string, insertions: number, deletions: number) {
@@ -87,6 +109,12 @@ export class DB {
         aiScore INTEGER,
         localScore INTEGER,
         progressPercent INTEGER,
+        aiModel TEXT,
+        aiProvider TEXT,
+        aiTokens INTEGER,
+        aiDurationMs INTEGER,
+        chunksCount INTEGER,
+        lastGenAt INTEGER,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -122,6 +150,12 @@ export class DB {
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiScore INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN localScore INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN progressPercent INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN aiModel TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN aiProvider TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN aiTokens INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN aiDurationMs INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN chunksCount INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN lastGenAt INTEGER`); } catch {}
     this.persist();
   }
 

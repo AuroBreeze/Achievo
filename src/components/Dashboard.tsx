@@ -85,6 +85,32 @@ const StatValue: React.FC<{ value: React.ReactNode }> = ({ value }) => {
   return <div className="text-2xl font-semibold">{value}</div>;
 };
 
+// Reusable stat card component
+const StatCard: React.FC<{
+  title: string;
+  icon?: 'add' | 'del' | 'score' | 'trend' | 'total' | 'local' | 'ai' | 'percent';
+  value?: React.ReactNode;
+  valueClassName?: string; // for colored value like trend/percent
+  subtitle?: React.ReactNode;
+  titleAttr?: string;
+  children?: React.ReactNode; // custom content instead of value
+}> = ({ title, icon, value, valueClassName, subtitle, titleAttr, children }) => (
+  <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg" title={typeof titleAttr === 'string' ? titleAttr : undefined}>
+    <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2">
+      {icon && <StatIcon name={icon} />}
+      {title}
+    </div>
+    {children ? (
+      children
+    ) : valueClassName ? (
+      <div className={`text-2xl font-semibold ${valueClassName}`}>{value}</div>
+    ) : (
+      <StatValue value={value} />
+    )}
+    {subtitle}
+  </div>
+);
+
 // Helper: replace any top-level JSON object that contains a markdown/summary/text field with that field content
 function replaceJsonObjectWithMarkdown(text: string): string {
   let out = String(text);
@@ -118,6 +144,12 @@ const Dashboard: React.FC = () => {
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [featuresSummary, setFeaturesSummary] = useState<string>('');
   const [daily, setDaily] = useState<Array<{ date: string; baseScore: number; aiScore: number | null; localScore: number | null; progressPercent: number | null }>>([]);
+  const [lastGenAt, setLastGenAt] = useState<number | null>(null);
+  const [chunksCount, setChunksCount] = useState<number | null>(null);
+  const [aiModel, setAiModel] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [aiTokens, setAiTokens] = useState<number | null>(null);
+  const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -128,6 +160,15 @@ const Dashboard: React.FC = () => {
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
     else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
     if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
+    // update AI meta if present
+    if (t) {
+      if (t.lastGenAt) setLastGenAt(Number(t.lastGenAt));
+      if (typeof t.chunksCount === 'number') setChunksCount(t.chunksCount);
+      setAiModel((t as any).aiModel ?? null);
+      setAiProvider((t as any).aiProvider ?? null);
+      setAiTokens((t as any).aiTokens ?? null);
+      setAiDurationMs((t as any).aiDurationMs ?? null);
+    }
     // show persisted markdown immediately if no local text yet
     if (!todayText && typeof t?.summary === 'string') {
       let s = t.summary;
@@ -140,6 +181,13 @@ const Dashboard: React.FC = () => {
         } catch {}
       }
       setTodayText(s);
+      // derive chunks count if DB meta not present
+      if (t && typeof (t as any).chunksCount !== 'number') {
+        try {
+          const m = (s || '').match(/###\s*分片\s+\d+/g);
+          setChunksCount(m ? m.length : null);
+        } catch {}
+      }
     }
   };
 
@@ -212,6 +260,14 @@ const Dashboard: React.FC = () => {
       const anyRes: any = res as any;
       const md = (anyRes.summary ?? anyRes.markdown ?? '（无内容）');
       setTodayText(String(md));
+      // meta 将在 loadToday() 后端持久化读取，这里仅临时显示
+      setLastGenAt(Date.now());
+      if (chunksCount === null) {
+        try {
+          const m = String(md).match(/###\s*分片\s+\d+/g);
+          setChunksCount(m ? m.length : null);
+        } catch {}
+      }
       const sl = (typeof anyRes.scoreLocal === 'number') ? anyRes.scoreLocal :
                  (typeof anyRes.score_local === 'number') ? anyRes.score_local : undefined;
       const sa = (typeof anyRes.scoreAi === 'number') ? anyRes.scoreAi :
@@ -319,7 +375,7 @@ const Dashboard: React.FC = () => {
           />
         </div>
       </section>
-      <section className="lg:col-span-2 flex items-center gap-2">
+      <section className="lg:col-span-2 flex items-center gap-3 flex-wrap">
         <button
           onClick={generateTodaySummary}
           disabled={todayBusy}
@@ -330,6 +386,13 @@ const Dashboard: React.FC = () => {
           className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
         >{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
+        <span className="text-xs text-slate-400 ml-auto flex items-center gap-3">
+          <span>{lastGenAt ? `上次生成: ${new Date(lastGenAt).toLocaleString()}` : '尚未生成'}</span>
+          {typeof chunksCount === 'number' && <span>{`分片: ${chunksCount}`}</span>}
+          {aiModel && <span>{`模型: ${aiModel}${aiProvider ? ` / ${aiProvider}` : ''}`}</span>}
+          {typeof aiTokens === 'number' && <span>{`tokens: ${aiTokens}`}</span>}
+          {typeof aiDurationMs === 'number' && <span>{`用时: ${Math.max(1, Math.round(aiDurationMs/1000))}s`}</span>}
+        </span>
       </section>
       <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
         <h3 className="text-sm font-semibold text-slate-100">AI 总结</h3>
@@ -402,10 +465,20 @@ const Dashboard: React.FC = () => {
       </section>
       {/* 历史分数图已移除 */}
       {diffOpen && (
-        <section className="lg:col-span-2 bg-slate-900 rounded border border-slate-800 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
-            <div className="font-medium">今日改动详情（统一 diff）</div>
-            <div className="text-xs opacity-70">{diffBusy ? '加载中…' : (diffText ? '' : '无改动')}</div>
+        <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 overflow-hidden shadow-lg">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700/70">
+            <div className="text-sm font-semibold text-slate-100">今日改动详情（统一 diff）</div>
+            <div className="flex items-center gap-2">
+              <button
+                className="px-2 py-1 text-xs rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
+                onClick={() => {
+                  try {
+                    navigator.clipboard?.writeText(diffText || '');
+                  } catch {}
+                }}
+              >复制</button>
+              <span className="text-xs text-slate-400">{diffBusy ? '加载中…' : (diffText ? '' : '无改动')}</span>
+            </div>
           </div>
           <div className="max-h-[50vh] overflow-auto font-mono text-xs">
             {diffText ? (
@@ -426,6 +499,7 @@ const Dashboard: React.FC = () => {
           </div>
         </section>
       )}
+
     </div>
   );
 }

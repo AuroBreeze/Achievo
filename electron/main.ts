@@ -203,21 +203,21 @@ ipcMain.handle('summary:todayDiff', async () => {
   // Also compute git numstat for persistence below
   const ns = await git.getNumstatSinceDate(today);
   // Prefer chunked summarization to avoid context overflow; fallback to single-shot
-  let jsonText = '';
+  let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
   try {
-    jsonText = await summarizeUnifiedDiffChunked(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+    summaryRes = await summarizeUnifiedDiffChunked(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
   } catch {
-    jsonText = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+    summaryRes = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
   }
   let aiScore = 0;
   let markdown = '';
   try {
-    const obj = JSON.parse(jsonText);
+    const obj = JSON.parse(summaryRes.text);
     aiScore = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
     markdown = String(obj?.markdown || '');
   } catch {
     // 回退：若不是 JSON，则当作纯文本 markdown 处理
-    markdown = jsonText || '';
+    markdown = summaryRes.text || '';
   }
 
   // Compute progress percent vs yesterday baseline
@@ -242,6 +242,15 @@ ipcMain.handle('summary:todayDiff', async () => {
   // Persist metrics and append to history
   try {
     await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
+    // persist AI meta & generation info
+    await db.setDayAiMeta(today, {
+      aiModel: summaryRes.model || undefined,
+      aiProvider: summaryRes.provider || undefined,
+      aiTokens: typeof summaryRes.tokens === 'number' ? summaryRes.tokens : undefined,
+      aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
+      chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
+      lastGenAt: Date.now(),
+    });
     const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
   } catch {}
