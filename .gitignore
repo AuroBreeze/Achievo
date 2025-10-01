@@ -1,7 +1,7 @@
 node_modules/
 dist/
 dist-electron/
-build/
+release/
 .DS_Store
 *.log
 .env
