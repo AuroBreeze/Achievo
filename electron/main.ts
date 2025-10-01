@@ -243,10 +243,13 @@ ipcMain.handle('summary:todayDiff', async () => {
   try {
     await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
     // persist AI meta & generation info
+    const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
+      ? summaryRes.tokens
+      : Math.max(1, Math.round((markdown?.length || 0) / 4));
     await db.setDayAiMeta(today, {
       aiModel: summaryRes.model || undefined,
       aiProvider: summaryRes.provider || undefined,
-      aiTokens: typeof summaryRes.tokens === 'number' ? summaryRes.tokens : undefined,
+      aiTokens: estTokens,
       aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
       chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
       lastGenAt: Date.now(),

@@ -160,14 +160,14 @@ const Dashboard: React.FC = () => {
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
     else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
     if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
-    // update AI meta if present
+    // update AI meta from DB (do not rely on truthy checks)
     if (t) {
-      if (t.lastGenAt) setLastGenAt(Number(t.lastGenAt));
-      if (typeof t.chunksCount === 'number') setChunksCount(t.chunksCount);
+      setLastGenAt((t as any).lastGenAt ?? null);
+      setChunksCount(typeof (t as any).chunksCount === 'number' ? (t as any).chunksCount : null);
       setAiModel((t as any).aiModel ?? null);
       setAiProvider((t as any).aiProvider ?? null);
-      setAiTokens((t as any).aiTokens ?? null);
-      setAiDurationMs((t as any).aiDurationMs ?? null);
+      setAiTokens(typeof (t as any).aiTokens === 'number' ? (t as any).aiTokens : null);
+      setAiDurationMs(typeof (t as any).aiDurationMs === 'number' ? (t as any).aiDurationMs : null);
     }
     // show persisted markdown immediately if no local text yet
     if (!todayText && typeof t?.summary === 'string') {
@@ -386,13 +386,7 @@ const Dashboard: React.FC = () => {
           className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
         >{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
-        <span className="text-xs text-slate-400 ml-auto flex items-center gap-3">
-          <span>{lastGenAt ? `上次生成: ${new Date(lastGenAt).toLocaleString()}` : '尚未生成'}</span>
-          {typeof chunksCount === 'number' && <span>{`分片: ${chunksCount}`}</span>}
-          {aiModel && <span>{`模型: ${aiModel}${aiProvider ? ` / ${aiProvider}` : ''}`}</span>}
-          {typeof aiTokens === 'number' && <span>{`tokens: ${aiTokens}`}</span>}
-          {typeof aiDurationMs === 'number' && <span>{`用时: ${Math.max(1, Math.round(aiDurationMs/1000))}s`}</span>}
-        </span>
+        {/* 状态信息已移至 AI 总结卡片的长度信息行 */}
       </section>
       <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
         <h3 className="text-sm font-semibold text-slate-100">AI 总结</h3>
@@ -440,10 +434,27 @@ const Dashboard: React.FC = () => {
             const replaced = replaceJsonObjectWithMarkdown(mdSource);
             if (typeof replaced === 'string') mdSource = replaced;
           }
-          const preview = mdSource.slice(0, 120).replace(/\s+/g, ' ').trim();
+          // Compose meta info line (length, time, chunks, model/provider, tokens, duration)
+          // Fallback to today's DB fields when local state is null (e.g., after route switch)
+          const tmeta: any = today || {};
+          const metaParts: string[] = [];
+          const metaLen = mdSource.length;
+          const metaLast = lastGenAt ?? (typeof tmeta.lastGenAt === 'number' ? tmeta.lastGenAt : null);
+          const metaChunks = (typeof chunksCount === 'number') ? chunksCount : (typeof tmeta.chunksCount === 'number' ? tmeta.chunksCount : null);
+          const metaModel = aiModel ?? (tmeta.aiModel ?? null);
+          const metaProv = aiProvider ?? (tmeta.aiProvider ?? null);
+          const metaTokens = (typeof aiTokens === 'number') ? aiTokens : (typeof tmeta.aiTokens === 'number' ? tmeta.aiTokens : null);
+          const metaDur = (typeof aiDurationMs === 'number') ? aiDurationMs : (typeof tmeta.aiDurationMs === 'number' ? tmeta.aiDurationMs : null);
+          metaParts.push(`长度: ${metaLen}`);
+          if (typeof metaChunks === 'number') metaParts.push(`分片: ${metaChunks}`);
+          if (metaLast) metaParts.push(`上次: ${new Date(Number(metaLast)).toLocaleString()}`);
+          if (metaModel) metaParts.push(`模型: ${metaModel}${metaProv ? ` / ${metaProv}` : ''}`);
+          if (typeof metaTokens === 'number') metaParts.push(`tokens: ${metaTokens}`);
+          if (typeof metaDur === 'number') metaParts.push(`用时: ${Math.max(1, Math.round(Number(metaDur)/1000))}s`);
+          const metaLine = metaParts.join(' · ');
           return (
             <div className="prose prose-invert max-w-none mt-2 text-slate-200">
-              <div className="text-xs text-slate-400 mb-2">{`长度: ${mdSource.length}${preview ? ` · 预览: ${preview}...` : ''}`}</div>
+              <div className="text-xs text-slate-400 mb-2">{metaLine}</div>
               {mdSource.trim() ? (
                 <ReactMarkdown
                   key={`md-${mdSource.length}`}
