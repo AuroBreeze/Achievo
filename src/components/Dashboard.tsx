@@ -18,6 +18,44 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend);
 
+// Helper: greedily extract the first balanced JSON object from a string
+function extractFirstJsonObject(text: string): string | null {
+  const s = String(text);
+  const i = s.indexOf('{');
+  if (i < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let j = i; j < s.length; j++) {
+    const ch = s[j];
+    if (inStr) {
+      if (!esc && ch === '"') inStr = false;
+      esc = (!esc && ch === '\\');
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return s.slice(i, j + 1); }
+  }
+  return null;
+}
+
+// Helper: replace any top-level JSON object that contains a markdown/summary/text field with that field content
+function replaceJsonObjectWithMarkdown(text: string): string {
+  let out = String(text);
+  const objStr = extractFirstJsonObject(out);
+  if (objStr) {
+    try {
+      const obj = JSON.parse(objStr);
+      let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+      if (typeof md === 'string' && md.trim()) {
+        // unescape common JSON escapes
+        md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        out = out.replace(objStr, md);
+      }
+    } catch {}
+  }
+  return out;
+}
+
 const Dashboard: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [today, setToday] = useState<{ date: string; insertions: number; deletions: number; baseScore: number; trend: number; summary?: string | null } | null>(null);
@@ -246,6 +284,39 @@ const Dashboard: React.FC = () => {
               const md = obj?.markdown ?? obj?.summary ?? obj?.text;
               if (typeof md === 'string' && md.trim()) mdSource = md;
             } catch {}
+          }
+          // Additionally, strip any fenced JSON blocks ```...``` that contain a markdown field
+          if (mdSource.includes('```')) {
+            const fenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
+            mdSource = mdSource.replace(fenceRe, (_m, inner) => {
+              try {
+                const obj = JSON.parse(String(inner));
+                let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                if (typeof md === 'string' && md.trim()) {
+                  md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                  return md;
+                }
+              } catch {}
+              return _m;
+            });
+            // inline fence on one line: ```json { ... } ```
+            const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
+            mdSource = mdSource.replace(inlineFenceRe, (_m, inner) => {
+              try {
+                const obj = JSON.parse(String(inner));
+                let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                if (typeof md === 'string' && md.trim()) {
+                  md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                  return md;
+                }
+              } catch {}
+              return _m;
+            });
+          }
+          // Final fallback: if页面上仍存在裸露的 JSON 对象（含 markdown 字段），直接替换为其中的 markdown
+          if (/\{[\s\S]*\}/.test(mdSource) && mdSource.includes('markdown')) {
+            const replaced = replaceJsonObjectWithMarkdown(mdSource);
+            if (typeof replaced === 'string') mdSource = replaced;
           }
           const preview = mdSource.slice(0, 120).replace(/\s+/g, ' ').trim();
           return (

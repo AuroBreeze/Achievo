@@ -28,6 +28,30 @@ export async function summarizeWithAI(diff: DiffStat, score: number): Promise<st
   return text || '（无内容）';
 }
 
+// Greedy but balanced extraction of the first JSON object in a text
+function extractFirstJsonObject(s: string): string | null {
+  const i = s.indexOf('{');
+  if (i < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let j = i; j < s.length; j++) {
+    const ch = s[j];
+    if (inStr) {
+      if (!esc && ch === '"') inStr = false;
+      esc = (!esc && ch === '\\');
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return s.slice(i, j + 1);
+    }
+  }
+  return null;
+}
+
 export async function summarizeUnifiedDiff(
   diffText: string,
   ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures }
@@ -57,7 +81,7 @@ export async function summarizeUnifiedDiff(
   if (!apiKey) throw new Error('缺少 AI API Key');
 
   const client = new OpenAI({ apiKey, baseURL });
-  const system = '你是资深代码审阅助手。请只输出严格的 JSON，不要任何额外文本。JSON 格式如下：\n' +
+  const system = '你是资深代码审阅助手。请只输出严格的 JSON，不要任何额外文本，不要使用```代码块包裹，不要输出除JSON外的说明。JSON 格式如下：\n' +
     '{"score_ai": 0-100 的整数, "markdown": 用于展示的 Markdown 文本}。';
   // 限长，避免超出上限
   const snippet = diffText.slice(0, 60000);
@@ -83,4 +107,152 @@ export async function summarizeUnifiedDiff(
   });
   const text2 = resp.choices?.[0]?.message?.content?.trim();
   return text2 || '（无内容）';
+}
+
+// Split unified diff by file sections (diff --git ...) into size-bounded chunks
+function splitUnifiedDiffIntoChunks(diffText: string, maxChars = 48000): string[] {
+  const parts = diffText.split(/\n(?=diff --git )/g); // keep the first line if not starting with diff
+  const chunks: string[] = [];
+  let current = '';
+  for (let i = 0; i < parts.length; i++) {
+    const seg = (i === 0 && !parts[0].startsWith('diff --git ')) ? parts[0] : ('\n' + parts[i]);
+    if ((current + seg).length > maxChars && current) {
+      chunks.push(current);
+      current = seg;
+    } else {
+      current += seg;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.filter(c => c.trim());
+}
+
+// Try to parse model output that may include code fences or non-strict JSON
+function tryParseSummaryJson(text: string): { score_ai: number; markdown: string } | null {
+  if (!text) return null;
+  let t = text.trim();
+  // strip code fences ```json ... ``` or ``` ... ``` (support \r\n)
+  const fence = /^```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```$/m;
+  const fm = t.match(fence);
+  if (fm && fm[1]) t = fm[1].trim();
+  // try direct JSON first
+  try {
+    const obj = JSON.parse(t);
+    const sc = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
+    const md = String(obj?.markdown ?? obj?.summary ?? obj?.text ?? '');
+    return { score_ai: sc, markdown: md };
+  } catch {}
+  // fallback: extract the first {...} block and parse
+  const balanced = extractFirstJsonObject(t);
+  if (balanced) {
+    try {
+      const obj = JSON.parse(balanced);
+      const sc = Math.max(0, Math.min(100, Number(obj?.score_ai ?? obj?.score) || 0));
+      const md = String(obj?.markdown ?? obj?.summary ?? obj?.text ?? '');
+      return { score_ai: sc, markdown: md };
+    } catch {}
+  }
+  // last resort: regex to capture "markdown":"..."
+  const m1 = t.match(/"markdown"\s*:\s*"([\s\S]*?)"\s*(,|\})/);
+  if (m1) {
+    const md = m1[1].replace(/\\n/g,'\n').replace(/\\"/g,'"');
+    return { score_ai: 0, markdown: md };
+  }
+  return null;
+}
+
+// Replace any fenced JSON blocks that contain a {"markdown": "..."} with the inner markdown content
+function replaceJsonFencesWithMarkdown(md: string): string {
+  if (!md) return md;
+  let out = md;
+  // global, multiline: block fences ```lang\n...\n```
+  const blockFenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
+  out = out.replace(blockFenceRe, (_m, inner) => {
+    const parsed = tryParseSummaryJson(String(inner));
+    if (parsed?.markdown && parsed.markdown.trim()) return parsed.markdown.trim();
+    return _m;
+  });
+  // inline fences: ```lang { ... } ``` (same line)
+  const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
+  out = out.replace(inlineFenceRe, (_m, inner) => {
+    const parsed = tryParseSummaryJson(String(inner));
+    if (parsed?.markdown && parsed.markdown.trim()) return parsed.markdown.trim();
+    return _m;
+  });
+  return out;
+}
+
+// Chunked summarization to avoid context overflow; returns JSON string like {"score_ai": number, "markdown": string}
+export async function summarizeUnifiedDiffChunked(
+  diffText: string,
+  ctx?: { insertions?: number; deletions?: number; prevBaseScore?: number; localScore?: number; features?: DiffFeatures }
+): Promise<string> {
+  const trimmed = (diffText || '').trim();
+  if (!trimmed) return JSON.stringify({ score_ai: 0, markdown: '今日无代码改动' });
+
+  // If small enough, reuse single-shot path
+  if (trimmed.length <= 60000) {
+    try { return await summarizeUnifiedDiff(diffText, ctx); } catch {}
+  }
+
+  const cfg = await getConfig();
+  const provider = cfg.aiProvider || 'openai';
+  const model = cfg.aiModel || (provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini');
+  const baseURL = cfg.aiBaseUrl || (provider === 'deepseek' ? 'https://api.deepseek.com' : undefined);
+  const apiKey = cfg.aiApiKey || cfg.openaiApiKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('缺少 AI API Key');
+
+  const client = new OpenAI({ apiKey, baseURL });
+  const chunks = splitUnifiedDiffIntoChunks(trimmed, 48000);
+
+  const system = '你是资深代码审阅助手。请只输出严格的 JSON，不要任何额外文本。JSON 格式如下：\n' +
+    '{"score_ai": 0-100 的整数, "markdown": 用于展示的 Markdown 文本}。';
+  const f = ctx?.features;
+  const featuresCompact = f ? `\n特征摘要：filesTotal=${f.filesTotal}, codeFiles=${f.codeFiles}, testFiles=${f.testFiles}, docFiles=${f.docFiles}, configFiles=${f.configFiles}, hunks=${f.hunks}, renames=${f.renameOrMove}, langs=${Object.keys(f.languages||{}).join('+')}, depChanges=${f.dependencyChanges}, securitySensitive=${f.hasSecuritySensitive}` : '';
+  const metrics = `提供的参考指标：新增行=${ctx?.insertions ?? '未知'}，删除行=${ctx?.deletions ?? '未知'}，本地分数(localScore)=${ctx?.localScore ?? '未知'}，昨日基准(prevBase)=${ctx?.prevBaseScore ?? '未知'}。${featuresCompact}`;
+
+  const partials: { score_ai: number; markdown: string }[] = [];
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const part = chunks[idx].slice(0, 45000); // extra safety margin
+    const user = `这是第 ${idx+1}/${chunks.length} 个分片的统一 diff，请针对该分片生成 JSON：\n` +
+      `- score_ai: 0-100 的整数\n` +
+      `- markdown: 中文 Markdown，聚焦该分片的关键变更点/价值与风险/后续建议\n` +
+      `${metrics}\n---\n${part}`;
+    const resp = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      temperature: 0.2,
+    });
+    const txt = resp.choices?.[0]?.message?.content?.trim() || '';
+    const parsed = tryParseSummaryJson(txt);
+    if (parsed) partials.push(parsed);
+    else {
+      // if still not parseable, treat as markdown text
+      partials.push({ score_ai: 0, markdown: txt });
+    }
+  }
+
+  // Aggregate (sanitize any leftover JSON-looking markdown)
+  const sanitized = partials.map(p => {
+    let md = p.markdown || '';
+    // If markdown still looks like JSON object or a fenced block, try to parse/replace
+    if (/^\s*\{[\s\S]*\}\s*$/.test(md)) {
+      const parsed = tryParseSummaryJson(md);
+      if (parsed?.markdown) md = parsed.markdown;
+    }
+    if (md.includes('```')) {
+      md = replaceJsonFencesWithMarkdown(md);
+    }
+    return { score_ai: p.score_ai || 0, markdown: md };
+  });
+  const scoreAvg = sanitized.length ? Math.round(sanitized.reduce((s, p) => s + (p.score_ai || 0), 0) / sanitized.length) : 0;
+  let combinedMd = sanitized.map((p, i) => (p.markdown?.trim() ? `### 分片 ${i+1}\n\n${p.markdown.trim()}` : '')).filter(Boolean).join('\n\n');
+  // Final pass: in case any leftover fenced JSON blocks remain
+  if (combinedMd.includes('```')) combinedMd = replaceJsonFencesWithMarkdown(combinedMd);
+  const header = `# 今日改动总结（分片合并）\n\n`;
+  const finalMd = header + combinedMd;
+  return JSON.stringify({ score_ai: scoreAvg, markdown: finalMd });
 }

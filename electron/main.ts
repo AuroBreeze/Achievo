@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { analyzeDiff } from './services/codeAnalyzer';
 import { scoreProgress, scoreFromFeatures } from './services/progressScorer';
 import { extractDiffFeatures } from './services/diffFeatures';
-import { summarizeWithAI, summarizeUnifiedDiff } from './services/aiSummarizer';
+import { summarizeWithAI, summarizeUnifiedDiff, summarizeUnifiedDiffChunked } from './services/aiSummarizer';
 import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
@@ -202,7 +202,13 @@ ipcMain.handle('summary:todayDiff', async () => {
   // Summarize with AI and pass context metrics
   // Also compute git numstat for persistence below
   const ns = await git.getNumstatSinceDate(today);
-  const jsonText = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+  // Prefer chunked summarization to avoid context overflow; fallback to single-shot
+  let jsonText = '';
+  try {
+    jsonText = await summarizeUnifiedDiffChunked(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+  } catch {
+    jsonText = await summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+  }
   let aiScore = 0;
   let markdown = '';
   try {
