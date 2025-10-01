@@ -66,11 +66,13 @@ async function runTodaySummaryJob(): Promise<JobStatus['result']> {
   emitSummaryProgress(20);
 
   let prevBase = 0;
+  let prevLocal = 0;
   try {
     const y = db.getYesterday(today);
     if (y) {
       const prev = await db.getDay(y);
       prevBase = prev?.baseScore || 0;
+      prevLocal = typeof prev?.localScore === 'number' ? (prev.localScore as number) : 0;
     }
   } catch {}
 
@@ -107,10 +109,9 @@ async function runTodaySummaryJob(): Promise<JobStatus['result']> {
     markdown = summaryRes.text || '';
   }
 
-  let progressPercent = 0;
-  if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
-  else progressPercent = localScore > 0 ? 100 : 0;
-  progressPercent = Math.round(progressPercent);
+  // Scheme B: compare against yesterday's localScore (same 0..100 scale)
+  const denomB = Math.max(1, prevLocal || 50); // default baseline=50 for first day or missing
+  let progressPercent = Math.round(((localScore - denomB) / denomB) * 100);
   if (progressPercent > 25) progressPercent = 25;
 
   try { await db.setDayCounts(today, ns.insertions, ns.deletions); } catch {}
@@ -366,11 +367,13 @@ ipcMain.handle('summary:todayDiff', async () => {
   const localScore = scoreFromFeatures(feats);
   // Previous baseline
   let prevBase = 0;
+  let prevLocal = 0;
   try {
     const y = db.getYesterday(today);
     if (y) {
       const prev = await db.getDay(y);
       prevBase = prev?.baseScore || 0;
+      prevLocal = typeof prev?.localScore === 'number' ? (prev.localScore as number) : 0;
     }
   } catch {}
 
@@ -395,12 +398,9 @@ ipcMain.handle('summary:todayDiff', async () => {
     markdown = summaryRes.text || '';
   }
 
-  // Compute progress percent vs yesterday baseline
-  let progressPercent = 0;
-  if (prevBase > 0) progressPercent = ((localScore - prevBase) / prevBase) * 100;
-  else progressPercent = localScore > 0 ? 100 : 0;
-  // Round and clamp to a maximum of 25%
-  progressPercent = Math.round(progressPercent);
+  // Compute progress percent vs yesterday localScore (Scheme B)
+  const denomB = Math.max(1, prevLocal || 50);
+  let progressPercent = Math.round(((localScore - denomB) / denomB) * 100);
   if (progressPercent > 25) progressPercent = 25;
 
   // Save counts, ensure row, save markdown and AI base score
