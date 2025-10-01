@@ -168,6 +168,7 @@ const Dashboard: React.FC = () => {
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [featuresSummary, setFeaturesSummary] = useState<string>('');
   const [daily, setDaily] = useState<Array<{ date: string; baseScore: number; aiScore: number | null; localScore: number | null; progressPercent: number | null }>>([]);
+  const [trendDerived, setTrendDerived] = useState<number | null>(null);
   const [lastGenAt, setLastGenAt] = useState<number | null>(null);
   const [chunksCount, setChunksCount] = useState<number | null>(null);
   const [aiModel, setAiModel] = useState<string | null>(null);
@@ -248,30 +249,48 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const loadDailyRange = React.useCallback(async () => {
+    if (!window.api?.statsGetRange) return;
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 29); // last 30 days inclusive
+    const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const rows = await window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) });
+    const mapped = (rows||[]).map(r => ({
+      date: r.date,
+      baseScore: r.baseScore,
+      aiScore: (r as any).aiScore ?? null,
+      localScore: (r as any).localScore ?? null,
+      progressPercent: (r as any).progressPercent ?? null,
+    })).sort((a,b)=> a.date.localeCompare(b.date));
+    setDaily(mapped);
+  }, []);
+
   React.useEffect(() => {
     loadToday();
     loadTotals();
     loadTodayLive();
-    // Daily charts can load in background
-    (async () => {
-      if (!window.api?.statsGetRange) return;
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - 29); // load last 30 days daily metrics (inclusive)
-      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      const rows = await window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) });
-      const mapped = (rows||[]).map(r => ({
-        date: r.date,
-        baseScore: r.baseScore,
-        aiScore: (r as any).aiScore ?? null,
-        localScore: (r as any).localScore ?? null,
-        progressPercent: (r as any).progressPercent ?? null,
-      })).sort((a,b)=> a.date.localeCompare(b.date));
-      setDaily(mapped);
-    })();
-    const id = setInterval(() => { loadToday(); loadTotals(); loadTodayLive(); }, 10000);
+    loadDailyRange();
+    const id = setInterval(() => {
+      loadToday();
+      loadTotals();
+      loadTodayLive();
+      loadDailyRange();
+    }, 10000);
     return () => clearInterval(id);
-  }, []);
+  }, [loadDailyRange]);
+
+  // derive trend from daily array when API trend is missing or stale
+  React.useEffect(() => {
+    if (!daily || daily.length < 2) { setTrendDerived(null); return; }
+    const last = daily[daily.length - 1];
+    const prev = daily[daily.length - 2];
+    if (typeof last?.baseScore === 'number' && typeof prev?.baseScore === 'number') {
+      setTrendDerived(last.baseScore - prev.baseScore);
+    } else {
+      setTrendDerived(null);
+    }
+  }, [daily]);
 
   const generateTodaySummary = async () => {
     if (!window.api) return;
@@ -329,7 +348,11 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="trend" /> 趋势(较昨日)</div>
-          <div className={`text-2xl font-semibold ${((today?.trend||0) >= 0) ? 'text-green-400' : 'text-red-400'}`}>{today?.trend ?? '-'}</div>
+          {(() => {
+            const val = (typeof (today as any)?.trend === 'number') ? (today as any).trend : trendDerived;
+            const color = (typeof val === 'number' ? (val >= 0) : ((today?.trend||0) >= 0)) ? 'text-green-400' : 'text-red-400';
+            return <div className={`text-2xl font-semibold ${color}`}>{(val ?? today?.trend ?? '—')}</div>;
+          })()}
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
           <div className="text-sm font-semibold text-slate-100 flex items-center gap-2 mb-2"><StatIcon name="total" /> 总改动数</div>

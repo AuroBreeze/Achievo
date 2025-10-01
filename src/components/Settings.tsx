@@ -163,7 +163,7 @@ const Settings: React.FC = () => {
                 max={16}
                 value={quoteFontSize}
                 onChange={e=>setQuoteFontSize(parseInt(e.target.value)||11)}
-                className="flex-1"
+                className="hidden"
               />
               <input
                 type="number"
@@ -186,7 +186,7 @@ const Settings: React.FC = () => {
                 max={600}
                 value={quoteRefreshSeconds}
                 onChange={e=>setQuoteRefreshSeconds(parseInt(e.target.value)||60)}
-                className="flex-1"
+                className="hidden"
                 disabled={!quoteEnabled}
               />
               <input
@@ -212,7 +212,7 @@ const Settings: React.FC = () => {
                 step={0.5}
                 value={quoteLetterSpacing}
                 onChange={e=>setQuoteLetterSpacing(parseFloat(e.target.value))}
-                className="flex-1"
+                className="hidden"
               />
               <input
                 type="number"
