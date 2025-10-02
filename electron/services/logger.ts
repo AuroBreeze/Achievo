@@ -13,15 +13,35 @@ function getEnvLevel(): LogLevel {
   return 'info';
 }
 
-function getNsSet(): Set<string> {
+function getEnvNsSet(): Set<string> {
   const raw = (process.env.ACHIEVO_DEBUG_NS || '').toLowerCase();
   const set = new Set<string>();
   raw.split(',').map(s => s.trim()).filter(Boolean).forEach(ns => set.add(ns));
   return set;
 }
 
-const globalLevel: LogLevel = getEnvLevel();
-const debugNs = getNsSet();
+let globalLevel: LogLevel = getEnvLevel();
+let debugNs: Set<string> = getEnvNsSet();
+
+export function setLoggerLevel(level: LogLevel) {
+  globalLevel = level;
+}
+
+export function setLoggerNamespaces(namespaces: string[]) {
+  const set = new Set<string>();
+  (namespaces || []).map(s => String(s || '').toLowerCase().trim()).filter(Boolean).forEach(ns => set.add(ns));
+  debugNs = set;
+}
+
+export function applyLoggerConfig(cfg: { logLevel?: LogLevel; logNamespaces?: string[] } | undefined) {
+  if (!cfg) return;
+  if (cfg.logLevel && (cfg.logLevel === 'debug' || cfg.logLevel === 'info' || cfg.logLevel === 'error')) {
+    setLoggerLevel(cfg.logLevel);
+  }
+  if (Array.isArray(cfg.logNamespaces)) {
+    setLoggerNamespaces(cfg.logNamespaces);
+  }
+}
 
 export function getLogger(namespace: string) {
   const ns = namespace.toLowerCase();

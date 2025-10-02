@@ -22,6 +22,9 @@ const Settings: React.FC = () => {
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   const [dbPollSeconds, setDbPollSeconds] = useState<number>(10);
   const [dailyCapRatioPct, setDailyCapRatioPct] = useState<number>(35);
+  // Developer logging
+  const [logLevel, setLogLevel] = useState<'debug'|'info'|'error'>('info');
+  const [logNamespacesText, setLogNamespacesText] = useState<string>('');
   // Learning curve (local scoring) parameters
   const [lsColdStartN, setLsColdStartN] = useState<number>(3);
   const [lsWindowDays, setLsWindowDays] = useState<number>(30);
@@ -61,6 +64,10 @@ const Settings: React.FC = () => {
     if (typeof dps === 'number' && dps > 0) setDbPollSeconds(dps);
     const dcr = (cfg as any).dailyCapRatio;
     if (typeof dcr === 'number' && dcr >= 0) setDailyCapRatioPct(Math.round(dcr * 100));
+    const ll = (cfg as any).logLevel;
+    if (ll === 'debug' || ll === 'info' || ll === 'error') setLogLevel(ll);
+    const lns = Array.isArray((cfg as any).logNamespaces) ? ((cfg as any).logNamespaces as string[]) : [];
+    setLogNamespacesText(lns.join(','));
     const ls = (cfg as any).localScoring || {};
     if (typeof ls.coldStartN === 'number') setLsColdStartN(ls.coldStartN);
     if (typeof ls.windowDays === 'number') setLsWindowDays(ls.windowDays);
@@ -98,6 +105,8 @@ const Settings: React.FC = () => {
       quoteLetterSpacing,
       dbPollSeconds,
       dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+      logLevel,
+      logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
       localScoring: {
         coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
         windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -118,6 +127,8 @@ const Settings: React.FC = () => {
       window.dispatchEvent(new CustomEvent('config:updated', { detail: {
         quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds,
         dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+        logLevel,
+        logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
         localScoring: {
           coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
           windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -198,6 +209,38 @@ const Settings: React.FC = () => {
           </div>
         </div>
         <p className="text-xs text-slate-400 mt-2">备注：若未填 AI API Key，将回退到 OpenAI API Key，再回退到环境变量 OPENAI_API_KEY。</p>
+      </section>
+      {/* Card: 开发者选项（日志） */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">开发者选项</h3>
+          <span className="text-xs text-slate-400">日志级别与命名空间</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">日志级别</label>
+            <select
+              value={logLevel}
+              onChange={e=>setLogLevel(e.target.value as any)}
+              className="w-40 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              <option value="debug">debug（调试）</option>
+              <option value="info">info（信息）</option>
+              <option value="error">error（错误）</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">影响全局日志级别。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">日志命名空间（逗号分隔）</label>
+            <input
+              value={logNamespacesText}
+              onChange={e=>setLogNamespacesText(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder="db,score,ai,git"
+            />
+            <p className="text-xs text-slate-500 mt-1">在 info 级别下，指定的命名空间也会输出 debug 日志。</p>
+          </div>
+        </div>
       </section>
       {/* Card: 学习曲线（本地进步分） */}
       <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">

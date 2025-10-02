@@ -11,6 +11,7 @@ import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
+import { applyLoggerConfig } from './services/logger';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
@@ -64,6 +65,8 @@ async function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  // Apply logger config on startup
+  getConfig().then(cfg => applyLoggerConfig({ logLevel: cfg.logLevel as any, logNamespaces: (cfg.logNamespaces as any) || [] })).catch(()=>{});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -119,7 +122,13 @@ ipcMain.handle('config:get', async () => {
 });
 
 ipcMain.handle('config:set', async (_evt, cfg: { openaiApiKey?: string; repoPath?: string }) => {
-  return setConfig(cfg);
+  await setConfig(cfg as any);
+  // Re-apply logger config after update
+  try {
+    const merged = await getConfig();
+    applyLoggerConfig({ logLevel: merged.logLevel as any, logNamespaces: (merged.logNamespaces as any) || [] });
+  } catch {}
+  return true;
 });
 
 // Select a local folder
