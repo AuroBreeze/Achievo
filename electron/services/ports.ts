@@ -1,5 +1,4 @@
 import { DB, DayRow } from './db_sqljs';
-import { db } from './dbInstance';
 import { GitAnalyzer, GitDiffNumstat } from './gitAnalyzer';
 import { summarizeUnifiedDiff, summarizeUnifiedDiffChunked } from './aiSummarizer';
 import type { DiffFeatures } from './diffFeatures';
@@ -66,15 +65,23 @@ class SummarizerAdapter implements SummarizerPort {
   }
 }
 
-export async function makeDefaultPorts(): Promise<Ports> {
+export async function makeDefaultPorts(deps?: { db?: DB | DBPort; repoPath?: string; summarizer?: SummarizerPort }): Promise<Ports> {
   const cfg = await getConfig();
-  const repo = cfg.repoPath;
+  const repo = deps?.repoPath ?? cfg.repoPath;
   if (!repo) throw new Error('未设置仓库路径');
   const ga = new GitAnalyzer(repo);
+  // Normalize db port
+  let dbPort: DBPort;
+  if (deps?.db) {
+    dbPort = deps.db instanceof DB ? new SqljsDbAdapter(deps.db) : (deps.db as DBPort);
+  } else {
+    // Fallback to a new instance if not injected
+    dbPort = new SqljsDbAdapter(new DB());
+  }
   return {
-    db: new SqljsDbAdapter(db as unknown as DB),
+    db: dbPort,
     git: new GitAdapter(ga),
-    summarizer: new SummarizerAdapter(),
+    summarizer: deps?.summarizer ?? new SummarizerAdapter(),
     cfg,
   };
 }

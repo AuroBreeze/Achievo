@@ -14,9 +14,10 @@ export class TrackerService {
   private timer: NodeJS.Timeout | null = null;
   private lastProcessedCommit: string | null = null;
   private lastError: string | null = null;
-  private db = new DB();
+  private db: DB;
   private repoPath: string | undefined;
   private intervalMs = 30_000; // default 30s
+  constructor(db?: DB) { this.db = db ?? new DB(); }
 
   async start(repoPath?: string, intervalMs?: number) {
     const cfg = await getConfig();

@@ -5,7 +5,7 @@ import { Storage } from './storage';
 import { todayKey } from './dateUtil';
 import { calcProgressPercentComplex } from './progressCalculator';
 import { computeLocalProgress } from './progressEngine';
-import { makeDefaultPorts } from './ports';
+import { makeDefaultPorts, type Ports } from './ports';
 
 export type SummaryResult = {
   date: string;
@@ -24,15 +24,15 @@ export type SummaryResult = {
 
 const storage = new Storage();
 
-export async function buildTodayUnifiedDiff(): Promise<{ date: string; diff: string }> {
-  const { git } = await makeDefaultPorts();
+export async function buildTodayUnifiedDiff(deps?: Parameters<typeof makeDefaultPorts>[0]): Promise<{ date: string; diff: string }> {
+  const { git } = await makeDefaultPorts(deps);
   const today = todayKey();
   const diff = await git.getUnifiedDiffSinceDate(today);
   return { date: today, diff };
 }
 
-export async function generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }): Promise<SummaryResult> {
-  const { db: pdb, git, cfg, summarizer } = await makeDefaultPorts();
+export async function generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }, deps?: Parameters<typeof makeDefaultPorts>[0]): Promise<SummaryResult> {
+  const { db: pdb, git, cfg, summarizer } = await makeDefaultPorts(deps);
   const today = todayKey();
   // Local scoring parameters
   const ls = (cfg as any).localScoring || {};

@@ -1,7 +1,6 @@
 import { DB, DayRow } from './db_sqljs';
 import { getConfig, setConfig } from './config';
 import { GitAnalyzer } from './gitAnalyzer';
-import { db as sharedDb } from './dbInstance';
 import { todayKey as todayKeyUtil } from './dateUtil';
 import { summarizeWithAI } from './aiSummarizer';
 
@@ -18,7 +17,7 @@ function computeTotals(days: DayRow[]) {
 }
 
 export class StatsService {
-  constructor(private db = new DB()) {}
+  constructor(private db: DB = new DB()) {}
 
   async getToday(): Promise<DayRow> {
     const key = todayKey();
@@ -96,11 +95,11 @@ export class StatsService {
     const ns = await git.getNumstatSinceDate(today);
     // Persist to DB for real-time baseScore/trend
     try {
-      await sharedDb.setDayCounts(today, ns.insertions, ns.deletions);
+      await this.db.setDayCounts(today, ns.insertions, ns.deletions);
       try {
-        const row = await sharedDb.getDay(today);
+        const row = await this.db.getDay(today);
         if (row && (typeof row.aiScore === 'number' || typeof row.localScore === 'number')) {
-          await sharedDb.setDayMetrics(today, { aiScore: row.aiScore ?? undefined, localScore: row.localScore ?? undefined, progressPercent: row.progressPercent ?? undefined });
+          await this.db.setDayMetrics(today, { aiScore: row.aiScore ?? undefined, localScore: row.localScore ?? undefined, progressPercent: row.progressPercent ?? undefined });
         }
       } catch {}
     } catch {}
@@ -115,8 +114,8 @@ export class StatsService {
     if (!repo) throw new Error('未设置仓库路径');
     const git = new GitAnalyzer(repo);
     const today = todayKey();
-    const totals = await sharedDb.getTotals();
-    const todayRow = await sharedDb.getDay(today);
+    const totals = await this.db.getTotals();
+    const todayRow = await this.db.getDay(today);
     const live = await git.getNumstatSinceDate(today);
     const dbTodayIns = todayRow?.insertions || 0;
     const dbTodayDel = todayRow?.deletions || 0;

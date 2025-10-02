@@ -7,7 +7,7 @@ import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
-import { db } from './services/dbInstance';
+import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
@@ -16,6 +16,9 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
 const tracker = new TrackerService();
 const stats = new StatsService();
+
+// Local DB instance (replaces singleton usage)
+const dbInstance = new DB();
 
 let win: BrowserWindow | null = null;
 
@@ -31,7 +34,7 @@ jobManager.onProgress((job) => {
 // IPC: background job controls
 ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {
-    const res = await generateTodaySummary({ onProgress: onChunk });
+    const res = await generateTodaySummary({ onProgress: onChunk }, { db: dbInstance });
     return {
       date: res.date,
       summary: res.summary,
@@ -148,7 +151,7 @@ ipcMain.handle('stats:getToday', async () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
-  const row = await db.getDay(today);
+  const row = await dbInstance.getDay(today);
   if (row) return row;
   return {
     date: today,
@@ -172,7 +175,7 @@ ipcMain.handle('stats:getToday', async () => {
 });
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
-  return db.getDaysRange(payload.startDate, payload.endDate);
+  return dbInstance.getDaysRange(payload.startDate, payload.endDate);
 });
 
 ipcMain.handle('summary:generate', async () => {
@@ -187,7 +190,7 @@ ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string
 
 // Summarize today's concrete code changes via unified diff
 ipcMain.handle('summary:todayDiff', async () => {
-  const res = await generateTodaySummary();
+  const res = await generateTodaySummary(undefined, { db: dbInstance });
   return {
     date: res.date,
     summary: res.summary,
@@ -206,12 +209,12 @@ ipcMain.handle('summary:todayDiff', async () => {
 
 // Return today's unified diff text for in-app visualization
 ipcMain.handle('diff:today', async () => {
-  return buildTodayUnifiedDiff();
+  return buildTodayUnifiedDiff({ db: dbInstance });
 });
 
 // Totals across all days
 ipcMain.handle('stats:getTotals', async () => {
-  return db.getTotals();
+  return dbInstance.getTotals();
 });
 
 // Live Git-based today's insertions/deletions (includes working tree)
