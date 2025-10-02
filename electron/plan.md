@@ -1,80 +1,92 @@
-# Achievo Electron 子项目计划（architecture & refactor）
+# Achievo Electron 重构计划（解耦与内聚）
 
-## 目标
-- [ ] 将 `electron/main.ts` 中的业务逻辑服务化，保持 `main.ts` 专注于窗口生命周期与 IPC 转发。
-- [ ] 任务生成（“今日总结”）在后台稳健运行，切页不中断，进度可感知，可恢复。
-- [ ] 指标口径统一且可解释：基础分、进步百分比、本地/AI 分、今日/累计改动数。
-- [ ] 打包产物在 Windows/macOS/Linux 上稳定可用（WASM/路径/图标/镜像）。
+## Findings（现状与问题）
 
-## 当前问题
-- [ ] `main.ts` 行数多、职责过多（窗口、任务编排、DB 持久化、Git 调用、AI 调用、统计口径）。
-- [ ] 背景任务与 UI 耦合（进度/状态散落），复用难，测试难。
-- [ ] 进步百分比算法与累计基数混用（已改为“方案 B”，与昨日 `localScore` 对比）。
+- **[中心编排器耦合较高]**
+  - `electron/services/summaryService.ts` 同时依赖：
+    - 配置：`getConfig()`（`config.ts`）
+    - Git：`GitAnalyzer`（`gitAnalyzer.ts`）
+    - 特征/打分：`extractDiffFeatures()`（`diffFeatures.ts`）、`scoreFromFeatures()`（`progressScorer.ts`）、`normalizeLocalByECDF()`（`progressCalculator.ts`）
+    - AI：`summarizeUnifiedDiff*()`（`aiSummarizer.ts`）
+    - 存储：`db`（`dbInstance.ts` -> `db_sqljs.ts`）、`Storage`（`storage.ts`）
+    - 日期：`todayKey()`（`dateUtil.ts`）
+  - 作为“用例层”，它汇集多个模块并承担过多细节，属于高扇入依赖点。
 
-## 拆分与模块边界
-- [ ] SummaryService（`services/summaryService.ts`）
-  - [ ] 读取当日 key、获取 unified diff/numstat（依赖 `GitAnalyzer`）。
-  - [ ] 提取特征、计算 `localScore`（依赖 `diffFeatures.ts`、`progressScorer.ts`）。
-  - [ ] 调用 AI 摘要：优先分片 `summarizeUnifiedDiffChunked`（携带 `onProgress`）。
-  - [ ] 计算 `progressPercent`（方案 B：对比昨日 `localScore`）。
-  - [ ] DB 持久化：`setDayCounts`/`setDaySummary`/`setDayMetrics`/`setDayAiMeta`/`updateAggregatesForDate`。
-  - [ ] API：`generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }): Promise<Result>`
-  - [ ] API：`buildTodayUnifiedDiff(): Promise<{ date: string; diff: string }>`
+- **[数据库单例耦合]**
+  - `dbInstance.ts` 暴露单例 `db`，被 `summaryService.ts` 及其他服务使用。
+  - `electron/services/db_sqljs.ts` 同时承担：
+    - Schema/migrate
+    - 业务相关计算（如 `setDayMetrics()` 中的 daily cap/增量计算）
+  - 数据层与业务规则混杂，增加复用与测试难度。
 
-- [ ] JobManager（`services/jobManager.ts`）
-  - [ ] 后台任务状态机：`idle|running|done|error`、`progress 0..100`、`startedAt/finishedAt`、`error`、`result`。
-  - [ ] `startTodaySummaryJob(run: () => Promise<Result>, emit: (p:number)=>void)`（幂等）
-  - [ ] `getTodayJobStatus()`
+- **[计算逻辑分散]**
+  - 进步分相关逻辑分布在：
+    - `progressScorer.ts`（raw 特征 -> raw 分）
+    - `progressCalculator.ts`（归一化/平滑）
+    - `db_sqljs.ts`（`setDayMetrics()` 也做了 base/趋势的业务计算）
+  - 使得“评分 → 持久化”的职责边界不清晰。
 
-- [ ] WindowService（`services/window.ts`）
-  - [ ] 统一创建 `BrowserWindow` 与系统集成（隐藏菜单栏、转发 `window:maximize-changed` 等）。
+- **[日志与环境开关分散]**
+  - 使用 `process.env.ACHIEVO_DEBUG` 字符串门控（`db_sqljs.ts`、计划加到 `summaryService.ts`），缺少统一 Logger，易导致不同环境下的不可控输出。
 
-- [ ] StatsService 扩展（`services/stats.ts`）
-  - [ ] 保留：`getToday()/getRange()/generateOnDemandSummary()`。
-  - [ ] 补齐：`getTodayLive()`、`getTotalsLive()` 的核心逻辑迁入 service，`main.ts` 仅做 IPC 转发。
+- **[前后端配置耦合点]**
+  - 渲染层 `src/components/Settings.tsx` 直接构造 `localScoring` 并通过 `window.api.setConfig()` 下发。
+  - 后端读取 `getConfig()`，与前端字段名强耦合；缺少 schema 校验层（如 zod/类型守卫）。
 
-- [ ] Utilities
-  - [x] `dateUtil.ts`：`todayKey()`、`yesterdayKey(key)`、`toKey(date)`。
-  - [x] `progressCalculator.ts`：`calcProgressPercentByPrevLocal(currentLocal, prevLocal?, defaultDenom=50, cap=25)`。
+## Dependency overview（依赖概览）
 
--## IPC 设计（main.ts 保留）
-- [x] `summary:job:start` / `summary:job:status` / `summary:job:progress`（转调 JobManager + SummaryService）
-- [x] `summary:todayDiff` → `SummaryService.generateTodaySummary()`（直调版，保留）
-- [x] `diff:today` → `SummaryService.buildTodayUnifiedDiff()`
-- [ ] `stats:getToday` / `stats:getRange` / `stats:getTotals` / `stats:getTodayLive` / `stats:getTotalsLive` → 转发到 `StatsService`
-- [ ] 配置、窗口控制、tracking：保持不变
+- **[扇出高]**
+  - `summaryService.ts`：依赖最多（AI/Git/评分/DB/配置/存储/日期）。
+  - `db_sqljs.ts`：被多处使用，包含 schema/迁移与业务更新。
 
-## 进度映射（后台任务）
-- [x] 10%：准备完成（配置/仓库/日期）
-- [x] 20%：提取特征、本地分计算
-- [x] 20%..95%：分片摘要进度（`onProgress(done,total)`）
-- [x] 96%..100%：AI 返回与持久化完成
+- **[低耦合工具]**
+  - `dateUtil.ts`、`stats.ts`、`codeAnalyzer.ts` 等工具型模块。
 
-## 迁移步骤（小步快跑，可回滚）
-- [x] 抽出 `dateUtil.ts` 与 `progressCalculator.ts`，替换 `main.ts` 内部调用。
-- [x] 新建 `summaryService.ts`，将 `summary:todayDiff` 与 `runTodaySummaryJob()` 流程迁入，`main.ts` 改为调用 service。
-- [ ] 新建 `jobManager.ts`，`summary:job:start`/`status` 与事件发射逻辑迁入。
-- [ ] 扩展 `stats.ts`，把 `getTodayLive`/`getTotalsLive` 核心逻辑迁入，`main.ts` 只转发。
-- [ ] 新建 `window.ts`，抽离窗口创建与事件绑定。
-- [ ] 清理 `main.ts` imports 与冗余逻辑，保留 IPC 注册与生命周期管理。
+## Recommended Actions（建议方案）
 
-## 测试与验收
-- [ ] 单测：`progressCalculator` 各边界：昨日为 0、缺失、正常、上限裁剪 25%。
-- [ ] 单测：`dateUtil` 键值与跨天边界。
-- [ ] 集成：`summaryService.generateTodaySummary()` 在模拟仓库（小/大 diff）下运行，验证分片进度回调与最终持久化。
-- [ ] 集成：`stats.getTodayLive()/getTotalsLive()` 与 DB/工作区变更一致性。
-- [ ] 端到端：启动 dev/打包后点击“生成今日总结”，切页返回看到进度，完成后看到结果与元信息。
+- **[分层与端口适配]**
+  - 抽出“用例服务接口”与“适配器”：
+    - 定义 `DBPort`（`getDay/upsertDay/setDayMetrics/...`），由 `db_sqljs.ts` 实现；`summaryService.ts` 通过依赖注入使用（替代单例）。
+    - 定义 `SummarizerPort`（chunked/single）、`GitPort`（diff/numstat）。
+  - 目标：`summaryService.ts` 只编排接口，不关心实现细节，降低耦合。
 
-## 打包与部署
-- [ ] `asarUnpack: ["node_modules/sql.js/dist/**"]` 保持；`locateFile()` dev/prod 兼容。
-- [ ] `vite.config.ts` 保持 `base: './'`，避免 file:// 白屏。
-- [ ] 镜像变量：`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR`。
-- [ ] 产物：Windows NSIS、macOS DMG、Linux AppImage。
+- **[评分责任统一]**
+  - 将“本地进步分”完整管线收口到单一模块 `progressEngine.ts`：
+    - 输入：`feats`、历史 `localScoreRaw[]`、配置。
+    - 输出：`{ localScoreRaw, localScore, debug? }`。
+  - `db_sqljs.ts` 仅负责存储；将基准分/趋势计算迁出为 `baseScoreEngine.ts`（或至少下沉到独立引擎）。
 
-## 验收标准
-- [ ] `main.ts` 行数显著减少，职责单一；服务层可独立测试。
-- [ ] 生成任务切页不中断，进度准确（分片级推进）。
-- [ ] 指标口径明确：
-  - [ ] “总改动数”= 累计；
-  - [ ] “今日新增/删除/合计”= 当日实时；
-  - [ ] 进步百分比= 方案 B（对比昨日 localScore，封顶 25%）。
+- **[去单例，注入依赖]**
+  - 替换 `dbInstance.ts`：在 `main.ts` 创建 DB 实例，并传入 `jobManager.ts`/`summaryService.ts`。
+  - 测试中可使用“内存 DB 实现”替代，以提升可测性。
+
+- **[统一日志]**
+  - 建立 `logger.ts`（基于 pino/debug/winston），分级：`info/debug/error`，命名空间：`db/score/ai/git`。
+  - 由 Logger 统一解析环境变量，避免各处 `if (process.env...)`。
+
+- **[配置 Schema 校验]**
+  - 使用 zod 校验 `getConfig()` 结果（含 `localScoring`），填充默认并矫正边界值。
+  - `Settings.tsx` 仅做 UI；边界与默认在后端 Schema 落实。
+
+- **[IPC/事件边界]**
+  - 抽象 `config:updated` 协议为单处常量/类型，前后端共享，避免字段名漂移。
+
+## 执行计划（Phase）
+
+- **Phase 1（最小可行）**
+  - 建立接口层：`DBPort/GitPort/SummarizerPort` 并在 `summaryService.ts` 注入使用。
+  - `progressEngine.ts` 收口评分链；`summaryService.ts` 只负责编排。
+  - `logger.ts` 引入并替换分散的环境门控。
+  - `config` 引入 zod 校验，生成安全配置对象。
+
+- **Phase 2（结构优化）**
+  - 去除 `dbInstance.ts` 单例；在 `main.ts` 统一创建与注入。
+  - 下沉基准分规则为 `baseScoreEngine.ts`，`db_sqljs.ts` 只做 CRUD + migrate。
+  - 集中 `ipcEvents.ts`（常量/类型）并共享至渲染层。
+  - 在 `progressEngine` 提供可选 `debug` 字段，仅在调试环境输出。
+
+## Summary（小结）
+
+- 当前结构清晰，但“编排器（`summaryService.ts`）”与“数据层（`db_sqljs.ts`）”负担过重导致耦合偏高。
+- 通过“接口化/引擎化/依赖注入/统一日志/配置校验”的渐进式重构，可显著降低耦合、提升可测性与可维护性。
+- 如需，可先提交最小 PR：创建 `progressEngine.ts` 与 `DBPort` 接口，并让 `summaryService.ts` 切换到依赖注入。

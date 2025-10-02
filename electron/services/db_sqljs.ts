@@ -4,10 +4,12 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
 import { calcProgressPercentComplex } from './progressCalculator';
+import { computeBaseUpdate } from './baseScoreEngine';
+import { getConfig } from './config';
 import type { Database as SQLDatabase } from 'sql.js';
 
-// Daily increment cap ratio relative to yesterday's base (e.g., 0.2 = 20%)
-const DAILY_CAP_RATIO = 0.2;
+// Default daily cap ratio relative to yesterday's base when config is missing
+const DEFAULT_DAILY_CAP_RATIO = 0.35;
 
 export type DayRow = {
   date: string; // YYYY-MM-DD
@@ -18,6 +20,7 @@ export type DayRow = {
   summary?: string | null;
   aiScore?: number | null;
   localScore?: number | null;
+  localScoreRaw?: number | null;
   progressPercent?: number | null;
   // meta
   aiModel?: string | null;
@@ -65,7 +68,9 @@ export class DB {
     const y = this.getYesterday(date);
     const yesterday = y ? await this.getDay(y) : null;
     const prevBase = Math.max(100, yesterday?.baseScore || 100);
-    const baseCandidate = this.computeCumulativeBase(prevBase, ins, del);
+    const cfg = await getConfig();
+    const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+    const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
     const exists = await this.getDay(date);
     if (!exists) {
       const trend = yesterday ? Math.round(baseCandidate - yesterday.baseScore) : 0;
@@ -165,6 +170,7 @@ export class DB {
         summary TEXT,
         aiScore INTEGER,
         localScore INTEGER,
+        localScoreRaw INTEGER,
         progressPercent INTEGER,
         aiModel TEXT,
         aiProvider TEXT,
@@ -206,6 +212,7 @@ export class DB {
     // Defensive add columns for existing DBs (ignore if already exists)
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiScore INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN localScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN localScoreRaw INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN progressPercent INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiModel TEXT`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiProvider TEXT`); } catch {}
@@ -221,7 +228,7 @@ export class DB {
     await fs.writeFile(this.filePath, Buffer.from(data));
   }
 
-  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number): number {
+  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number, capRatio: number): number {
     // Daily increment with diminishing returns
     const wAdded = 1.6;
     const wRemoved = 0.8;
@@ -229,12 +236,13 @@ export class DB {
     const alpha = 220;
     const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
     const base0 = Math.max(100, prevBase);
-    // Cap the daily increase to DAILY_CAP_RATIO of previous base
-    const incCapped = Math.min(Math.max(0, dailyInc), base0 * DAILY_CAP_RATIO);
+    // Cap the daily increase to capRatio of previous base
+    const ratio = Number.isFinite(capRatio) && capRatio >= 0 && capRatio <= 1 ? capRatio : DEFAULT_DAILY_CAP_RATIO;
+    const incCapped = Math.min(Math.max(0, dailyInc), base0 * ratio);
     // 避免极小正增量被四舍五入为 0
     const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
     const next = base0 + incApplied;
-    try { console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * DAILY_CAP_RATIO, applied: incApplied, next }); } catch {}
+    try { if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * ratio, applied: incApplied, next }); } catch {}
     return next;
   }
 
@@ -263,7 +271,9 @@ export class DB {
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
-      const baseScore = this.computeCumulativeBase(prevBase, ins, del);
+      const cfg = await getConfig();
+      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const baseScore = this.computeCumulativeBase(prevBase, ins, del, capRatio);
       const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [date, ins, del, baseScore, trend, null, now, now]);
@@ -275,7 +285,9 @@ export class DB {
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
-      const baseCandidate = this.computeCumulativeBase(prevBase, ins, del);
+      const cfg = await getConfig();
+      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
       const safeBase = Math.max(Math.max(100, existing.baseScore || 0), baseCandidate);
       const trend = yesterday ? Math.round(safeBase - yesterday.baseScore) : 0;
       this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
@@ -292,70 +304,63 @@ export class DB {
     await this.persist();
   }
 
-  async setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) {
+  async setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) {
     await this.ready;
     const now = Date.now();
     const row = await this.getDay(date);
     if (!row) return; // ensure row exists before setting
     const ai = (metrics.aiScore ?? row.aiScore ?? null);
     const loc = (metrics.localScore ?? row.localScore ?? null);
+    const locRaw = (metrics.localScoreRaw ?? row.localScoreRaw ?? null);
     const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
 
-    // Recompute baseScore with reduced reliance on line counts and stronger link to AI/local scores
-    // Hybrid daily increment components（取消按昨日基准的 25% 封顶）：
-    // - Lines component (lower weight): ins*0.8 + del*0.4 with diminishing returns, ~0..60
-    // - AI component: up to 30 points (aiScore 0..100 -> 0..30)
-    // - Local component: absolute contribution up to 40 points
+    // 通过 baseScoreEngine 计算 nextBase/trend
     const yKey = this.getYesterday(date);
     const y = yKey ? await this.getDay(yKey) : null;
     const prevBase = Math.max(100, y?.baseScore || 100);
     const ins = Math.max(0, row.insertions || 0);
     const del = Math.max(0, row.deletions || 0);
-    const rawLines = ins * 0.8 + del * 0.4;
-    const incLines = 60 * (1 - Math.exp(-rawLines / 300));
-    const aiPart = Math.max(0, Math.min(30, (typeof ai === 'number' ? ai : 0) * 0.3));
-    // Absolute local contribution (0..40), decoupled from prevBase to avoid always-0 when prevBase is high
-    const locAbs = Math.max(0, Math.min(100, (typeof loc === 'number' ? loc : 0)));
-    const incLocal = Math.max(0, Math.min(40, locAbs * 0.4));
-    const dailyInc = incLines + aiPart + incLocal;
-    // When overwriting today (from summary), start from prevBase to allow lowering from a previously higher base
+    const cfg = await getConfig();
+    const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+    // overwriteToday 时，从 prevBase 开始计算，否则从当前记录的 baseScore
     const currentBase = opts?.overwriteToday ? prevBase : Math.max(prevBase, Math.max(100, row.baseScore || 0));
-    // Limit total daily gain to DAILY_CAP_RATIO of yesterday's base, accounting for any gain already applied today
-    const maxDailyAllowance = prevBase * DAILY_CAP_RATIO;
-    const alreadyGained = Math.max(0, currentBase - prevBase);
-    let remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
-    // Avoid floating epsilon causing ghost +1 when allowance is effectively zero
-    if (remainingAllowance < 1) remainingAllowance = 0;
-    const incCapped = Math.min(Math.max(0, dailyInc), remainingAllowance);
-    const incApplied = (remainingAllowance <= 0) ? 0 : (incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped));
-    const nextBase = currentBase + incApplied;
+    const res = computeBaseUpdate({
+      prevBase,
+      currentBase,
+      insertions: ins,
+      deletions: del,
+      aiScore: (typeof ai === 'number' ? ai : 0),
+      localScore: (typeof loc === 'number' ? loc : 0),
+      cfg: { dailyCapRatio: ratio },
+    });
     try {
-      console.debug('[DB] setDayMetrics cap', {
+      if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] setDayMetrics cap', {
         date,
         prevBase,
         currentBase,
         ins,
         del,
-        incLines: Math.round(incLines),
-        aiPart: Math.round(aiPart),
-        incLocal: Math.round(incLocal),
-        dailyInc: Math.round(dailyInc),
-        maxDailyAllowance: Math.round(maxDailyAllowance),
-        alreadyGained: Math.round(alreadyGained),
-        remainingAllowance: Math.round(remainingAllowance),
-        incApplied,
-        nextBase,
+        incLines: res.debug?.incLines,
+        aiPart: res.debug?.aiPart,
+        incLocal: res.debug?.incLocal,
+        dailyInc: res.debug?.dailyInc,
+        maxDailyAllowance: res.debug?.maxDailyAllowance,
+        alreadyGained: res.debug?.alreadyGained,
+        remainingAllowance: res.debug?.remainingAllowance,
+        incApplied: res.debug?.incApplied,
+        nextBase: res.nextBase,
       });
     } catch {}
-    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : incApplied;
+    const nextBase = res.nextBase;
+    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
 
     // If today's summary already exists and we're not explicitly overwriting, do NOT change base/trend here
     if (row.lastGenAt && !opts?.overwriteToday) {
-      this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, prog, now, date]);
+      this.db.run(`UPDATE days SET aiScore=?, localScore=?, localScoreRaw=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, locRaw, prog, now, date]);
       await this.persist();
       return;
     }
-    this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);
+    this.db.run(`UPDATE days SET aiScore=?, localScore=?, localScoreRaw=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, locRaw, prog, nextBase, trend, now, date]);
     await this.persist();
   }
 

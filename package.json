@@ -1,12 +1,12 @@
 {
   "name": "achievo",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "description": "Achievo - 代码进步追踪器 (Electron + React + Tailwind + TypeScript)",
   "main": "dist-electron/main.cjs",
   "type": "module",
   "license": "GPL-3.0-only",
-  "author": "Achievo Contributors",
+  "author": "AuroBreeze",
   "scripts": {
     "dev": "concurrently -n vite,esb,app \"vite --port 5173\" \"npm:dev:electron\" \"wait-on dist-electron/main.cjs tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "dev:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --outdir=dist-electron --external:electron --format=cjs --out-extension:.js=.cjs --watch",
@@ -23,7 +23,7 @@
   "build": {
     "appId": "com.windsurf.achievo",
     "productName": "Achievo",
-    "copyright": "Copyright © 2025 Achievo Contributors",
+    "copyright": "Copyright © 2025 AuroBreeze",
     "files": [
       "dist/**",
       "dist-electron/**",
@@ -41,12 +41,20 @@
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "appx", "arch": ["x64"] }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "appx": {
+      "identityName": "achievo", 
+      "publisher": "CN=a6f56dab-f4ff-4042-a7a2-53d23d3f62eb",
+      "publisherDisplayName": "Achievo",
+      "displayName": "Achievo",
+      "applicationId": "Achievo",
+      "backgroundColor": "#202124",
+      "languages": ["zh-CN", "en-US"],
+      "artifactName": "${productName}-${version}-${arch}.msix"
     },
     "mac": {
       "target": [
