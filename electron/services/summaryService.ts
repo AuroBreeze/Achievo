@@ -89,7 +89,8 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   }
 
   // Compute progress percent vs yesterday localScore (Scheme B)
-  let progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25 });
+  const hasChanges = (ns.insertions + ns.deletions) > 0 || (localScore > 0) || (feats.hunks > 0);
+  let progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25, hasChanges });
 
   // Persist counts & summary & metrics & meta
   try {
@@ -103,7 +104,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   } catch {}
   try {
     const lastGenAt = Date.now();
-    await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
+    await db.setDayMetrics(today, { aiScore, localScore, progressPercent }, { overwriteToday: true });
     const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
       ? summaryRes.tokens
       : Math.max(1, Math.round((markdown?.length || 0) / 4));
