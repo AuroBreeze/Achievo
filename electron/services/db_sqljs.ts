@@ -7,6 +7,7 @@ import { calcProgressPercentComplex } from './progressCalculator';
 import { computeBaseUpdate } from './baseScoreEngine';
 import { getConfig } from './config';
 import type { Database as SQLDatabase } from 'sql.js';
+import { getLogger } from './logger';
 
 // Default daily cap ratio relative to yesterday's base when config is missing
 const DEFAULT_DAILY_CAP_RATIO = 0.35;
@@ -39,6 +40,7 @@ export class DB {
   private db!: any;
   private filePath: string;
   private ready: Promise<void>;
+  private logger = getLogger('db');
 
   constructor() {
     this.filePath = path.join(app.getPath('userData'), 'achievo.sqljs');
@@ -339,8 +341,8 @@ export class DB {
       localScore: (typeof loc === 'number' ? loc : 0),
       cfg: { dailyCapRatio: ratio },
     });
-    try {
-      if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] setDayMetrics cap', {
+    if (this.logger.enabled.debug) {
+      this.logger.debug('setDayMetrics cap', {
         date,
         prevBase,
         currentBase,
@@ -356,7 +358,7 @@ export class DB {
         incApplied: res.debug?.incApplied,
         nextBase: res.nextBase,
       });
-    } catch {}
+    }
     const nextBase = res.nextBase;
     const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
 

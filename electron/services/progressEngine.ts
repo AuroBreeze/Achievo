@@ -1,4 +1,5 @@
 import { normalizeLocalByECDF, normalizeLocalNormalCDF } from './progressCalculator';
+import { getLogger } from './logger';
 
 export type LocalScoringConfig = {
   coldStartN: number;
@@ -80,7 +81,8 @@ export function computeLocalProgress(input: ComputeLocalInput): ComputeLocalOutp
     }
   }
 
-  const debug = (process.env.ACHIEVO_DEBUG === 'score') ? {
+  const logger = getLogger('score');
+  const debug = logger.enabled.debug ? {
     samples: samples.length,
     coldStart,
     cap,
@@ -91,6 +93,9 @@ export function computeLocalProgress(input: ComputeLocalInput): ComputeLocalOutp
     alpha: Math.max(0, Math.min(1, cfg.alpha)),
     afterSmooth: localScore,
   } : undefined;
+  if (logger.enabled.debug) {
+    logger.debug('computeLocalProgress', { samples: samples.length, coldStart, cap, beforeSmooth, prevLocal: input.prevLocal, prevLocalRaw: input.prevLocalRaw ?? null, prevLocalNorm: prevNorm, alpha: Math.max(0, Math.min(1, cfg.alpha)), afterSmooth: localScore });
+  }
 
   return { localScoreRaw: input.rawLocal, localScore, debug };
 }
