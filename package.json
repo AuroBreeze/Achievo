@@ -41,12 +41,23 @@
     ],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "appx", "arch": ["x64"] }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "appx": {
+      "identityName": "TO_REPLACE_IDENTITY_NAME", 
+      "publisher": "CN=TO_REPLACE_PUBLISHER_FROM_PARTNER_CENTER",
+      "publisherDisplayName": "Achievo",
+      "displayName": "Achievo",
+      "applicationId": "Achievo",
+      "backgroundColor": "#202124",
+      "languages": ["zh-CN", "en-US"],
+      "uapCapabilities": [
+        "internetClient",
+        "privateNetworkClientServer"
+      ]
     },
     "mac": {
       "target": [

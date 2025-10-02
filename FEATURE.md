@@ -1,61 +1,57 @@
-# Achievo V1.1.1 功能与变更汇总（2025-10-02）
+# Achievo V1.1.2 功能与变更汇总（2025-10-02）
 
-> 本文根据今日（本地时间）提交记录自动生成，概述新增功能、行为变更与缺陷修复，便于发布与回顾。
+> 本文根据今日（本地时间）的最新工作（含未推送提交）整理，概述新增功能、重构解耦与缺陷修复，便于发布与回顾。
 
 ## 今日概览
 - **[日期]** 2025-10-02
-- **[版本]** 1.1.1（package.json）
-- **[范围]** 核心评分/进度模型、进度百分比、数据库轮询与前端布局/设置
+- **[版本]** 1.1.2（package.json）
+- **[范围]** 服务层解耦（端口/适配器）、评分引擎抽离、基础分引擎抽离、AI 摘要端口化、严格类型修复
 
 ## 主要特性（Features）
-- **[进度百分比：复杂混合模型]**
-  - 引入综合模型，融合以下信号：`trend/prevBase`、`localScore`（语义分）、`aiScore`、`totalChanges`（当日 LoC，总改动数采用递减收益）。
-  - 超过 21% 后使用指数缓升（近似正态尾部）：越往上越难接近上限（25%），避免过快“拉满”。
-  - 相关文件：`electron/services/progressCalculator.ts`、`electron/services/summaryService.ts`。
-- **[本地进步分 Gaussian 映射]**
-  - 为 `localScore` 增加 Logistic S 曲线映射（midpoint≈60，slope≈12），使中段更易增长、尾部更难（符合正态感知）。
-  - 仅在“生成今日总结”时更新落库，日常轮询不变更本地/AI 分。
-  - 相关文件：`electron/services/progressCalculator.ts`、`electron/services/summaryService.ts`。
-- **[数据库轮询间隔设置]**
-  - 在设置页新增“数据库轮询间隔（秒）”，仪表盘按该间隔刷新今日/总计/区间数据。
-  - 相关文件：`electron/services/config.ts`、`src/components/Settings.tsx`、`src/components/Dashboard.tsx`。
+- **[端口/适配器：服务解耦]**
+  - 新增 `Ports` 抽象：`DBPort`、`GitPort`、`SummarizerPort`，以及 `makeDefaultPorts()` 默认装配。
+  - `summaryService.ts` 通过端口注入 `db/git/cfg/summarizer`，去除对单例与具体实现的直接依赖。
+  - 相关文件：`electron/services/ports.ts`、`electron/services/summaryService.ts`。
+- **[本地进步分引擎]**
+  - 新增 `progressEngine.ts`，统一完成 `raw → ECDF/冷启动 → 平滑 → 回归封顶` 的流水线，支持 `ACHIEVO_DEBUG=score` 调试输出。
+  - `summaryService.ts` 改为调用 `computeLocalProgress()`，减少编排器逻辑负担。
+  - 相关文件：`electron/services/progressEngine.ts`、`electron/services/summaryService.ts`。
+- **[基础分引擎]**
+  - 新增 `baseScoreEngine.ts`，将日增/封顶/趋势计算封装为纯函数，数据层仅负责 CRUD 与调用。
+  - `db_sqljs.ts:setDayMetrics()` 接入 `computeBaseUpdate()`，保留原有调试字段结构。
+  - 相关文件：`electron/services/baseScoreEngine.ts`、`electron/services/db_sqljs.ts`。
+- **[AI 摘要端口化]**
+  - `summaryService.ts` 改为通过 `SummarizerPort` 调用 `summarizeUnifiedDiff*()`，移除对 `aiSummarizer.ts` 的直接 import。
+  - 相关文件：`electron/services/ports.ts`、`electron/services/summaryService.ts`、`electron/services/aiSummarizer.ts`（接口兼容）。
 
 ## 缺陷修复（Fixes）
-- **[基础分跳动 +1 的尾差问题]**
-  - 修复浮点尾差导致的“额度接近 0 仍出现 +1”的问题；当 `remainingAllowance < 1` 视为 0，`incApplied = 0`。
-  - 生成总结后冻结当日 `baseScore`/`trend`（非 overwrite 情况下不再变更），避免总结后再被轮询顶高。
-  - 相关文件：`electron/services/db_sqljs.ts`。
-- **[时区导致“昨天”计算错误]**
-  - `getYesterday()` 改为本地日期格式化，避免 UTC 偏移导致“昨天被算成前天”。
-  - 相关文件：`electron/services/db_sqljs.ts`。
-- **[前端类型问题]**
-  - 订阅/恢复总结状态时，给 `window.api` 调用加可选链，消除 TS18048。
-  - 相关文件：`src/components/Dashboard.tsx`。
-- **[布局与体验]**
-  - 调整主内容区域左内边距，隐藏侧边栏时更多留白（`pl-20`）；展开时内容保持在侧边栏下方，减少重排、渲染更稳定。
-  - 相关文件：`src/App.tsx`。
+- **[严格类型与空安全]**
+  - 修复 ECDF/分位数实现的严格空检查（`progressCalculator.ts`），通过非空断言与边界保护消除 TS 报错。
+  - 修正 `ports.ts` 接口签名与适配器实现不一致问题（`DBPort.upsertDayAccumulate`、`GitPort.getNumstatSinceDate`）。
+- **[总结服务稳定性]**
+  - 统一 try/catch、作用域变量与持久化顺序，避免 `lastGenAt/estTokens` 与 `db`/`pdb` 引用不当导致的异常。
 
 ## 行为变更（Breaking/Behavior Changes）
-- **[进度百分比来源]**
-  - 现在随 DB 轮询实时重算并持久化；本地/AI 分只在“生成今日总结”时写入，不再随轮询变化。
-- **[基础分增长上限比例]**
-  - 单日基础分增幅上限调整为 **35%**（相对昨日基础分），并集中用常量 `DAILY_CAP_RATIO` 管理（便于后续调参）。
+- **[编排器职责收敛]**
+  - `summaryService.ts` 仅负责编排端口与引擎结果；评分与基础分的计算细节下沉至引擎层。
+- **[数据层去业务化]**
+  - `db_sqljs.ts` 不再内联基础分业务规则，改为调用 `baseScoreEngine.ts`，便于参数调优与单元测试。
 
 ## 受影响文件
-- `electron/services/config.ts`
-- `electron/services/db_sqljs.ts`
-- `electron/services/progressCalculator.ts`
+- `electron/services/ports.ts`
 - `electron/services/summaryService.ts`
-- `src/App.tsx`
-- `src/components/Dashboard.tsx`
-- `src/components/Settings.tsx`
+- `electron/services/progressEngine.ts`
+- `electron/services/baseScoreEngine.ts`
+- `electron/services/progressCalculator.ts`
+- `electron/services/db_sqljs.ts`
+- `electron/services/gitAnalyzer.ts`
+- `electron/services/aiSummarizer.ts`
 
 ## 今日提交（自 00:00 起）
-> 仅列出概要（hash/时间/主题），以实际 log 为准。
-- d6d27ac 2025-10-02 10:01 修复 db_sqljs：每日增量浮点精度与更新逻辑优化
-- cf93364 2025-10-02 09:55 修复 App 布局：主内容区域左边距调整（pl-14 → pl-20）
-- 7855487 2025-10-02 09:44 新增 progress：复杂进度百分比模型 + 高斯归一化
-- 6d0a5e0 2025-10-02 09:34 新增 progress：混合进度计算模型
-- 26d6e1d 2025-10-02 09:22 新增 config：数据库轮询间隔配置
-- 458e690 2025-10-02 09:18 新增 db：引入每日增量上限比例并优化基础分计算
+> 近期存在未推送的本地变更，此处仅列概要，具体以实际日志为准。
+- refactor(services): 引入 Ports/Adapters，summary 通过端口注入依赖
+- feat(engine): 新增 progressEngine，统一本地进步分流水线
+- feat(engine): 新增 baseScoreEngine，db_sqljs 接入基础分引擎
+- fix(types): 修复 ECDF 严格空检查与端口签名不一致
+- refactor(summary): AI 摘要改为通过 SummarizerPort 调用
 
