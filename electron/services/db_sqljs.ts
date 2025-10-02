@@ -241,7 +241,7 @@ export class DB {
     // 避免极小正增量被四舍五入为 0
     const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
     const next = base0 + incApplied;
-    try { console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * ratio, applied: incApplied, next }); } catch {}
+    try { if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * ratio, applied: incApplied, next }); } catch {}
     return next;
   }
 
@@ -344,7 +344,7 @@ export class DB {
     const incApplied = (remainingAllowance <= 0) ? 0 : (incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped));
     const nextBase = currentBase + incApplied;
     try {
-      console.debug('[DB] setDayMetrics cap', {
+      if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] setDayMetrics cap', {
         date,
         prevBase,
         currentBase,

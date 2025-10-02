@@ -32,6 +32,18 @@ export async function buildTodayUnifiedDiff(): Promise<{ date: string; diff: str
   if (!repo) throw new Error('未设置仓库路径');
   const git = new GitAnalyzer(repo);
   const today = todayKey();
+  const ls = (cfg as any).localScoring || {};
+  const LS_COLD_N = (typeof ls.coldStartN === 'number') ? ls.coldStartN : 3;
+  const LS_WIN_D = (typeof ls.windowDays === 'number') ? ls.windowDays : 30;
+  const LS_ALPHA = (typeof ls.alpha === 'number') ? ls.alpha : 0.65;
+  const LS_CAP_COLD = (typeof ls.capCold === 'number') ? ls.capCold : 98;
+  const LS_CAP_STABLE = (typeof ls.capStable === 'number') ? ls.capStable : 85;
+  const LS_W_LOW = (typeof ls.winsorPLow === 'number') ? ls.winsorPLow : 0.05;
+  const LS_W_HIGH = (typeof ls.winsorPHigh === 'number') ? ls.winsorPHigh : 0.95;
+  const LS_N_MEAN = (typeof ls.normalMean === 'number') ? ls.normalMean : 88;
+  const LS_N_STD = (typeof ls.normalStd === 'number') ? ls.normalStd : 14;
+  const LS_REG_CAP = (typeof ls.regressionCapAfterHigh === 'number') ? ls.regressionCapAfterHigh : 80;
+  const LS_HIGH_TH = (typeof ls.highThreshold === 'number') ? ls.highThreshold : 95;
   const diff = await git.getUnifiedDiffSinceDate(today);
   return { date: today, diff };
 }
@@ -42,48 +54,65 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   if (!repo) throw new Error('未设置仓库路径');
   const git = new GitAnalyzer(repo);
   const today = todayKey();
+  // Local scoring parameters
+  const ls = (cfg as any).localScoring || {};
+  const LS_COLD_N = (typeof ls.coldStartN === 'number') ? ls.coldStartN : 3;
+  const LS_WIN_D = (typeof ls.windowDays === 'number') ? ls.windowDays : 30;
+  const LS_ALPHA = (typeof ls.alpha === 'number') ? ls.alpha : 0.65;
+  const LS_CAP_COLD = (typeof ls.capCold === 'number') ? ls.capCold : 98;
+  const LS_CAP_STABLE = (typeof ls.capStable === 'number') ? ls.capStable : 85;
+  const LS_W_LOW = (typeof ls.winsorPLow === 'number') ? ls.winsorPLow : 0.05;
+  const LS_W_HIGH = (typeof ls.winsorPHigh === 'number') ? ls.winsorPHigh : 0.95;
+  const LS_N_MEAN = (typeof ls.normalMean === 'number') ? ls.normalMean : 88;
+  const LS_N_STD = (typeof ls.normalStd === 'number') ? ls.normalStd : 14;
+  const LS_REG_CAP = (typeof ls.regressionCapAfterHigh === 'number') ? ls.regressionCapAfterHigh : 80;
+  const LS_HIGH_TH = (typeof ls.highThreshold === 'number') ? ls.highThreshold : 95;
 
   // Build unified diff and semantic features first
   const diff = await git.getUnifiedDiffSinceDate(today);
   const feats = extractDiffFeatures(diff);
   const localScoreRaw = scoreFromFeatures(feats);
   // Build history window for ECDF (last 30 days, excluding today)
-  const startDate = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10); })();
+  const startDate = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - Math.max(7, LS_WIN_D)); return d.toISOString().slice(0,10); })();
   const historyRows = await db.getDaysRange(startDate, today);
   const samples: number[] = (historyRows || [])
     .filter(r => r.date !== today && typeof (r as any).localScoreRaw === 'number')
     .map(r => (r as any).localScoreRaw as number);
-  const coldStart = samples.length < 3; // N=3 warmup
-  const cap = coldStart ? 98 : 85;
+  const coldStart = samples.length < Math.max(0, LS_COLD_N);
+  const cap = coldStart ? Math.max(0, Math.min(100, LS_CAP_COLD)) : Math.max(0, Math.min(100, LS_CAP_STABLE));
   // Prefer ECDF percentile; fallback to Normal CDF when samples are insufficient
   let localScore = coldStart
-    ? Math.min(cap, Math.round(normalizeLocalNormalCDF(localScoreRaw, { mean: 88, std: 14 }) * 0.9))
-    : normalizeLocalByECDF(localScoreRaw, samples, { cap, winsor: { pLow: 0.05, pHigh: 0.95 } });
+    ? Math.min(cap, Math.round(normalizeLocalNormalCDF(localScoreRaw, { mean: LS_N_MEAN, std: LS_N_STD }) * 0.9))
+    : normalizeLocalByECDF(localScoreRaw, samples, { cap, winsor: { pLow: LS_W_LOW, pHigh: LS_W_HIGH } });
 
   // Previous baseline (base + local)
   let prevBase = 0;
   let prevLocal = 0;
+  let prevLocalRaw: number | null = null;
   try {
     const y = db.getYesterday(today);
     if (y) {
       const prev = await db.getDay(y);
       prevBase = prev?.baseScore || 0;
       prevLocal = typeof prev?.localScore === 'number' ? (prev.localScore as number) : 0;
+      prevLocalRaw = (typeof (prev as any)?.localScoreRaw === 'number') ? ((prev as any).localScoreRaw as number) : null;
     }
   } catch {}
 
   // History-aware damping to avoid hovering near 100 across days
   try {
     const prevLocalNorm = coldStart
-      ? Math.min(cap, Math.round(normalizeLocalNormalCDF(prevLocal, { mean: 88, std: 14 }) * 0.9))
-      : normalizeLocalByECDF(prevLocal, samples, { cap, winsor: { pLow: 0.05, pHigh: 0.95 } });
+      ? Math.min(cap, Math.round(normalizeLocalNormalCDF(prevLocal, { mean: LS_N_MEAN, std: LS_N_STD }) * 0.9))
+      : (typeof prevLocalRaw === 'number'
+          ? normalizeLocalByECDF(prevLocalRaw, samples, { cap, winsor: { pLow: LS_W_LOW, pHigh: LS_W_HIGH } })
+          : prevLocal);
     // Blend current with previous to smooth spikes; more weight on current
-    const alpha = 0.65; // 0..1, higher trusts current more
-    const blended = Math.round(alpha * localScore + (1 - alpha) * prevLocalNorm);
+    const alpha = Math.max(0, Math.min(1, LS_ALPHA)); // 0..1
+    const blended = Math.round(alpha * localScore + (1 - alpha) * (Math.max(0, Math.min(100, prevLocalNorm))));
     localScore = Math.min(localScore, blended);
     // If yesterday extremely high, enforce regression-to-mean cap today
-    if (typeof prevLocal === 'number' && prevLocal >= 95) {
-      localScore = Math.min(localScore, 80);
+    if (typeof prevLocal === 'number' && prevLocal >= Math.max(0, Math.min(100, LS_HIGH_TH))) {
+      localScore = Math.min(localScore, Math.max(0, Math.min(100, LS_REG_CAP)));
     }
   } catch {}
 
