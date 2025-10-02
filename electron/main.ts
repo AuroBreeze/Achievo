@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { analyzeDiff } from './services/codeAnalyzer';
 import { scoreProgress } from './services/progressScorer';
 import { summarizeWithAI } from './services/aiSummarizer';
@@ -11,7 +11,8 @@ import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
-import { applyLoggerConfig } from './services/logger';
+import { applyLoggerConfig, setLogFile, getLogger } from './services/logger';
+import path from 'node:path';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
@@ -66,7 +67,15 @@ async function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   // Apply logger config on startup
-  getConfig().then(cfg => applyLoggerConfig({ logLevel: cfg.logLevel as any, logNamespaces: (cfg.logNamespaces as any) || [] })).catch(()=>{});
+  getConfig().then(cfg => {
+    applyLoggerConfig({ logLevel: cfg.logLevel as any, logNamespaces: (cfg.logNamespaces as any) || [] });
+    try {
+      const p = cfg.logToFile ? path.join(app.getPath('userData'), (cfg.logFileName || 'achievo.log')) : null;
+      setLogFile(p);
+      const boot = getLogger('bootstrap');
+      if (boot.enabled.info) boot.info('logger:startup', { userData: app.getPath('userData'), logFile: p, level: cfg.logLevel, namespaces: cfg.logNamespaces });
+    } catch {}
+  }).catch(()=>{});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -127,6 +136,10 @@ ipcMain.handle('config:set', async (_evt, cfg: { openaiApiKey?: string; repoPath
   try {
     const merged = await getConfig();
     applyLoggerConfig({ logLevel: merged.logLevel as any, logNamespaces: (merged.logNamespaces as any) || [] });
+    const p = merged.logToFile ? path.join(app.getPath('userData'), (merged.logFileName || 'achievo.log')) : null;
+    setLogFile(p);
+    const boot = getLogger('bootstrap');
+    if (boot.enabled.info) boot.info('logger:config:update', { userData: app.getPath('userData'), logFile: p, level: merged.logLevel, namespaces: merged.logNamespaces });
   } catch {}
   return true;
 });
@@ -136,6 +149,21 @@ ipcMain.handle('dialog:selectFolder', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   if (res.canceled || res.filePaths.length === 0) return { canceled: true };
   return { canceled: false, path: res.filePaths[0] };
+});
+
+// App data directory helpers
+ipcMain.handle('app:userDataPath', async () => {
+  return app.getPath('userData');
+});
+
+ipcMain.handle('app:openUserData', async () => {
+  try {
+    const p = app.getPath('userData');
+    const r = await shell.openPath(p);
+    return { ok: r === '' };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 
 // Tracking controls

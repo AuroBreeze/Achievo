@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('api', {
   summaryTodayDiff: () => ipcRenderer.invoke('summary:todayDiff'),
   diffToday: () => ipcRenderer.invoke('diff:today'),
 
+  // app data directory helpers
+  userDataPath: () => ipcRenderer.invoke('app:userDataPath'),
+  openUserData: () => ipcRenderer.invoke('app:openUserData'),
+
   // window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowToggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),

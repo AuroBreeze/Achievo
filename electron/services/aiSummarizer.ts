@@ -2,6 +2,9 @@ import { getConfig } from './config';
 import type { DiffFeatures } from './diffFeatures';
 import OpenAI from 'openai';
 import type { DiffStat } from './codeAnalyzer';
+import { getLogger } from './logger';
+
+const logger = getLogger('ai');
 
 export async function summarizeWithAI(diff: DiffStat, score: number): Promise<string> {
   const cfg = await getConfig();
@@ -15,6 +18,7 @@ export async function summarizeWithAI(diff: DiffStat, score: number): Promise<st
   const content = `请用中文简要总结以下代码改动对质量和进步的影响：\n` +
     `新增行: ${diff.added}, 删除行: ${diff.removed}, 修改行: ${diff.changed}.\n` +
     `计算得到的进步分数: ${score}/100.`;
+  if (logger.enabled.debug) logger.debug('summarizeWithAI request', { provider, model, hasBaseURL: !!baseURL, added: diff.added, removed: diff.removed, changed: diff.changed, score });
   const resp = await client.chat.completions.create({
     model,
     messages: [
@@ -25,6 +29,7 @@ export async function summarizeWithAI(diff: DiffStat, score: number): Promise<st
   });
 
   const text = resp.choices?.[0]?.message?.content?.trim();
+  if (logger.enabled.info) logger.info('summarizeWithAI response', { model: (resp as any)?.model || model, provider, tokens: (resp as any)?.usage?.total_tokens });
   return text || '（无内容）';
 }
 
@@ -98,6 +103,7 @@ export async function summarizeUnifiedDiff(
     snippet;
 
   const started = Date.now();
+  if (logger.enabled.debug) logger.debug('summarizeUnifiedDiff request', { provider, model, hasBaseURL: !!baseURL, snippetLen: snippet.length, metrics: { insertions: ctx?.insertions, deletions: ctx?.deletions, localScore: ctx?.localScore, prevBaseScore: ctx?.prevBaseScore } });
   const resp = await client.chat.completions.create({
     model,
     messages: [
@@ -109,6 +115,7 @@ export async function summarizeUnifiedDiff(
   const durationMs = Date.now() - started;
   const text2 = resp.choices?.[0]?.message?.content?.trim() || '（无内容）';
   const tokens = (resp as any)?.usage?.total_tokens ?? undefined;
+  if (logger.enabled.info) logger.info('summarizeUnifiedDiff response', { model: (resp as any)?.model || model, provider, tokens, durationMs });
   return { text: text2, model: (resp as any)?.model || model, provider, tokens, durationMs, chunksCount: 1 };
 }
 
@@ -209,6 +216,7 @@ export async function summarizeUnifiedDiffChunked(
 
   const client = new OpenAI({ apiKey, baseURL });
   const chunks = splitUnifiedDiffIntoChunks(trimmed, 48000);
+  if (logger.enabled.debug) logger.debug('summarizeUnifiedDiffChunked start', { provider, model, hasBaseURL: !!baseURL, chunks: chunks.length });
 
   const system = '你是资深代码审阅助手。请只输出严格的 JSON，不要任何额外文本。JSON 格式如下：\n' +
     '{"score_ai": 0-100 的整数, "markdown": 用于展示的 Markdown 文本}。';
@@ -236,6 +244,7 @@ export async function summarizeUnifiedDiffChunked(
     });
     const txt = resp.choices?.[0]?.message?.content?.trim() || '';
     const tk = (resp as any)?.usage?.total_tokens ?? 0; totalTokens += (typeof tk === 'number' ? tk : 0);
+    if (logger.enabled.debug) logger.debug('chunk response', { idx: idx+1, of: chunks.length, tokens: tk });
     const parsed = tryParseSummaryJson(txt);
     if (parsed) partials.push(parsed);
     else {
@@ -266,5 +275,6 @@ export async function summarizeUnifiedDiffChunked(
   const header = `# 今日改动总结（分片合并）\n\n`;
   const finalMd = header + combinedMd;
   const durationMs = Date.now() - t0;
+  if (logger.enabled.info) logger.info('summarizeUnifiedDiffChunked done', { model, provider, tokens: totalTokens, durationMs, chunks: chunks.length });
   return { text: JSON.stringify({ score_ai: scoreAvg, markdown: finalMd }), model, provider, tokens: totalTokens, durationMs, chunksCount: chunks.length };
 }

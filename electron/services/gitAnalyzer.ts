@@ -1,4 +1,5 @@
 import simpleGit, { SimpleGit } from 'simple-git';
+import { getLogger } from './logger';
 
 export type GitDiffNumstat = {
   insertions: number;
@@ -7,6 +8,7 @@ export type GitDiffNumstat = {
 
 export class GitAnalyzer {
   private git: SimpleGit;
+  private logger = getLogger('git');
   constructor(private repoPath: string) {
     this.git = simpleGit(repoPath);
   }
@@ -14,6 +16,7 @@ export class GitAnalyzer {
   // Get aggregated insertions/deletions since local date (YYYY-MM-DD), including working tree changes
   async getNumstatSinceDate(date: string): Promise<GitDiffNumstat> {
     const before = `${date}T00:00:00`;
+    if (this.logger.enabled.debug) this.logger.debug('getNumstatSinceDate:start', { date, before });
     let base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
     if (!base) {
       base = (await this.git.raw(['rev-list', '--max-parents=0', 'HEAD'])).split('\n').filter(Boolean).pop() || '';
@@ -46,12 +49,16 @@ export class GitAnalyzer {
         ins += a; del += b;
       }
     }
-    return { insertions: ins, deletions: del };
+    const out = { insertions: ins, deletions: del };
+    if (this.logger.enabled.debug) this.logger.debug('getNumstatSinceDate:done', { base, ...out });
+    return out;
   }
 
   async getHeadCommit(): Promise<string> {
     const log = await this.git.log({ n: 1 });
-    return log.latest?.hash || '';
+    const hash = log.latest?.hash || '';
+    if (this.logger.enabled.debug) this.logger.debug('getHeadCommit', { hash });
+    return hash;
     }
 
   // Get aggregated insertions/deletions between two commits (exclusive of from, inclusive of to)
@@ -63,6 +70,7 @@ export class GitAnalyzer {
       base = parents.trim();
       if (!base) return { insertions: 0, deletions: 0 };
     }
+    if (this.logger.enabled.debug) this.logger.debug('getDiffNumstat', { base, toCommit });
     const out = await this.git.raw(['diff', '--numstat', `${base}..${toCommit}`]);
     // numstat lines: "<insert>\t<delete>\t<file>"
     let insertions = 0, deletions = 0;
@@ -77,7 +85,9 @@ export class GitAnalyzer {
         deletions += del;
       }
     }
-    return { insertions, deletions };
+    const res = { insertions, deletions };
+    if (this.logger.enabled.debug) this.logger.debug('getDiffNumstat:done', res);
+    return res;
   }
 
   // Working tree changes (not committed)
@@ -103,6 +113,7 @@ export class GitAnalyzer {
   async getUnifiedDiffSinceDate(date: string): Promise<string> {
     // Use ISO-like format to avoid locale parsing issues on different platforms
     const before = `${date}T00:00:00`;
+    if (this.logger.enabled.debug) this.logger.debug('getUnifiedDiffSinceDate:start', { date, before });
     let base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
     if (!base) {
       // fallback to first commit in repo
@@ -119,6 +130,7 @@ export class GitAnalyzer {
     // Avoid duplicating if any is empty; add a separator newline when both exist
     const parts = [committed.trim(), uncommitted.trim()].filter(p => p.length > 0);
     const combined = parts.join('\n');
+    if (this.logger.enabled.debug) this.logger.debug('getUnifiedDiffSinceDate:done', { base, parts: parts.length, len: combined.length });
     return combined;
   }
 }

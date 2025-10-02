@@ -18,6 +18,8 @@ export type AppConfig = {
   // Developer logging options
   logLevel?: 'debug' | 'info' | 'error';
   logNamespaces?: string[]; // e.g., ['db','score','ai']
+  logToFile?: boolean; // write JSONL logs to userData/logFileName
+  logFileName?: string; // default achievo.log
   // Local scoring normalization parameters (ECDF + cold-start + smoothing)
   localScoring?: {
     coldStartN?: number;    // number of days to treat as calibration (no ECDF)
@@ -43,6 +45,8 @@ const defaults: AppConfig = {
   dailyCapRatio: 0.35,
   logLevel: 'info',
   logNamespaces: [],
+  logToFile: false,
+  logFileName: 'achievo.log',
   localScoring: {
     coldStartN: 3,
     windowDays: 30,

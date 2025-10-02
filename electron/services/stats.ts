@@ -3,6 +3,7 @@ import { getConfig, setConfig } from './config';
 import { GitAnalyzer } from './gitAnalyzer';
 import { todayKey as todayKeyUtil } from './dateUtil';
 import { summarizeWithAI } from './aiSummarizer';
+import { getLogger } from './logger';
 
 function todayKey(): string {
   // Unified today key from dateUtil
@@ -18,10 +19,12 @@ function computeTotals(days: DayRow[]) {
 
 export class StatsService {
   constructor(private db: DB = new DB()) {}
+  private logger = getLogger('stats');
 
   async getToday(): Promise<DayRow> {
     const key = todayKey();
     const row = await this.db.getDay(key);
+    if (this.logger.enabled.debug) this.logger.debug('getToday', { key, found: !!row });
     return row || {
       date: key,
       insertions: 0,
@@ -35,7 +38,9 @@ export class StatsService {
   }
 
   async getRange(startDate: string, endDate: string): Promise<DayRow[]> {
-    return this.db.getDaysRange(startDate, endDate);
+    const rows = await this.db.getDaysRange(startDate, endDate);
+    if (this.logger.enabled.debug) this.logger.debug('getRange', { startDate, endDate, count: rows.length });
+    return rows;
   }
 
   // Generate summary for changes from the day after lastSummaryDate to today (inclusive)
@@ -56,6 +61,7 @@ export class StatsService {
     const content = `请用中文总结从${start}到${today}期间的代码变更：\n` +
       `总新增行: ${totals.insertions}，总删除行: ${totals.deletions}，基础分估算: ${totals.baseScore}。`;
 
+    if (this.logger.enabled.debug) this.logger.debug('generateOnDemandSummary:input', { start, today, totals });
     const text = await summarizeWithAI(
       { added: totals.insertions, removed: totals.deletions, changed: 0, totalBefore: 0, totalAfter: 0 },
       Math.min(100, totals.baseScore)
@@ -82,6 +88,7 @@ export class StatsService {
     cfg.lastSummaryDate = today;
     await setConfig(cfg);
 
+    if (this.logger.enabled.info) this.logger.info('generateOnDemandSummary:done', { date: today, len: (toSave || '').length });
     return { date: today, summary: toSave };
   }
 
@@ -93,6 +100,7 @@ export class StatsService {
     const git = new GitAnalyzer(repo);
     const today = todayKey();
     const ns = await git.getNumstatSinceDate(today);
+    if (this.logger.enabled.debug) this.logger.debug('getTodayLive:numstat', { today, ...ns });
     // Persist to DB for real-time baseScore/trend
     try {
       await this.db.setDayCounts(today, ns.insertions, ns.deletions);
@@ -104,7 +112,9 @@ export class StatsService {
       } catch {}
     } catch {}
     const total = Math.max(0, (ns.insertions || 0)) + Math.max(0, (ns.deletions || 0));
-    return { date: today, insertions: ns.insertions, deletions: ns.deletions, total };
+    const out = { date: today, insertions: ns.insertions, deletions: ns.deletions, total };
+    if (this.logger.enabled.debug) this.logger.debug('getTodayLive:out', out);
+    return out;
   }
 
   // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
@@ -121,7 +131,9 @@ export class StatsService {
     const dbTodayDel = todayRow?.deletions || 0;
     const adjIns = Math.max(0, (totals.insertions || 0) - dbTodayIns + live.insertions);
     const adjDel = Math.max(0, (totals.deletions || 0) - dbTodayDel + live.deletions);
-    return { insertions: adjIns, deletions: adjDel, total: adjIns + adjDel };
+    const out = { insertions: adjIns, deletions: adjDel, total: adjIns + adjDel };
+    if (this.logger.enabled.debug) this.logger.debug('getTotalsLive', { today, totals, todayRowExists: !!todayRow, live, out });
+    return out;
   }
 }
 

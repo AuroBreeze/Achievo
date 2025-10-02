@@ -25,6 +25,9 @@ const Settings: React.FC = () => {
   // Developer logging
   const [logLevel, setLogLevel] = useState<'debug'|'info'|'error'>('info');
   const [logNamespacesText, setLogNamespacesText] = useState<string>('');
+  const [logToFile, setLogToFile] = useState<boolean>(false);
+  const [logFileName, setLogFileName] = useState<string>('achievo.log');
+  const [userDataPath, setUserDataPath] = useState<string>('');
   // Learning curve (local scoring) parameters
   const [lsColdStartN, setLsColdStartN] = useState<number>(3);
   const [lsWindowDays, setLsWindowDays] = useState<number>(30);
@@ -68,6 +71,16 @@ const Settings: React.FC = () => {
     if (ll === 'debug' || ll === 'info' || ll === 'error') setLogLevel(ll);
     const lns = Array.isArray((cfg as any).logNamespaces) ? ((cfg as any).logNamespaces as string[]) : [];
     setLogNamespacesText(lns.join(','));
+    const ltf = (cfg as any).logToFile;
+    if (typeof ltf === 'boolean') setLogToFile(ltf);
+    const lfn = (cfg as any).logFileName;
+    if (typeof lfn === 'string' && lfn.trim()) setLogFileName(lfn);
+    try {
+      if ((window as any).api?.userDataPath) {
+        const p = await (window as any).api.userDataPath();
+        if (typeof p === 'string') setUserDataPath(p);
+      }
+    } catch {}
     const ls = (cfg as any).localScoring || {};
     if (typeof ls.coldStartN === 'number') setLsColdStartN(ls.coldStartN);
     if (typeof ls.windowDays === 'number') setLsWindowDays(ls.windowDays);
@@ -107,6 +120,8 @@ const Settings: React.FC = () => {
       dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
       logLevel,
       logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
+      logToFile,
+      logFileName: (logFileName || 'achievo.log').trim(),
       localScoring: {
         coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
         windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -129,6 +144,8 @@ const Settings: React.FC = () => {
         dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
         logLevel,
         logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
+        logToFile,
+        logFileName: (logFileName || 'achievo.log').trim(),
         localScoring: {
           coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
           windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -239,6 +256,39 @@ const Settings: React.FC = () => {
               placeholder="db,score,ai,git"
             />
             <p className="text-xs text-slate-500 mt-1">在 info 级别下，指定的命名空间也会输出 debug 日志。</p>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs text-slate-400 mb-1">写入日志文件</label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-200">
+              <input type="checkbox" checked={logToFile} onChange={e=>setLogToFile(e.target.checked)} />
+              <span>{logToFile ? '已启用' : '已关闭'}</span>
+            </label>
+            <p className="text-xs text-slate-500 mt-1">将日志以 JSONL 形式写入应用数据目录下的文件。</p>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs text-slate-400 mb-1">日志文件名</label>
+            <input
+              value={logFileName}
+              onChange={e=>setLogFileName(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder="achievo.log"
+              disabled={!logToFile}
+            />
+            <p className="text-xs text-slate-500 mt-1">文件将保存在应用数据目录（userData）下。</p>
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">应用数据目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.userDataPath(); setUserDataPath(p||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >显示路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openUserData(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {userDataPath && <p className="text-xs text-slate-400 break-all mt-1">{userDataPath}</p>}
           </div>
         </div>
       </section>

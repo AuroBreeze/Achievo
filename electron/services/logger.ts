@@ -22,6 +22,10 @@ function getEnvNsSet(): Set<string> {
 
 let globalLevel: LogLevel = getEnvLevel();
 let debugNs: Set<string> = getEnvNsSet();
+let filePath: string | null = null;
+let writeQueue: Promise<void> = Promise.resolve();
+// lazy import to avoid bundling issues in renderer
+let fsAsync: typeof import('node:fs/promises') | null = null;
 
 export function setLoggerLevel(level: LogLevel) {
   globalLevel = level;
@@ -43,6 +47,20 @@ export function applyLoggerConfig(cfg: { logLevel?: LogLevel; logNamespaces?: st
   }
 }
 
+export function setLogFile(path: string | null) {
+  filePath = path && path.trim() ? path : null;
+  if (filePath && !fsAsync) {
+    try { fsAsync = require('node:fs/promises'); } catch { fsAsync = null; }
+  }
+}
+
+function writeJsonl(ns: string, level: LogLevel, payload: any) {
+  if (!filePath || !fsAsync) return;
+  const line = JSON.stringify({ ts: Date.now(), ns, level, ...payload }) + '\n';
+  // Serialize writes to avoid interleaving
+  writeQueue = writeQueue.then(() => fsAsync!.appendFile(filePath as string, line, 'utf-8')).catch(()=>{});
+}
+
 export function getLogger(namespace: string) {
   const ns = namespace.toLowerCase();
   const isDebug = () => levelOrder[globalLevel] <= levelOrder['debug'] || debugNs.has(ns);
@@ -57,8 +75,8 @@ export function getLogger(namespace: string) {
       info: isInfo(),
       error: isError(),
     },
-    debug: (...args: any[]) => { if (isDebug()) { try { console.debug(prefix, ...args); } catch { /* noop */ } } },
-    info: (...args: any[]) => { if (isInfo()) { try { console.info(prefix, ...args); } catch { /* noop */ } } },
-    error: (...args: any[]) => { if (isError()) { try { console.error(prefix, ...args); } catch { /* noop */ } } },
+    debug: (...args: any[]) => { if (isDebug()) { try { console.debug(prefix, ...args); writeJsonl(ns, 'debug', { args }); } catch { /* noop */ } } },
+    info: (...args: any[]) => { if (isInfo()) { try { console.info(prefix, ...args); writeJsonl(ns, 'info', { args }); } catch { /* noop */ } } },
+    error: (...args: any[]) => { if (isError()) { try { console.error(prefix, ...args); writeJsonl(ns, 'error', { args }); } catch { /* noop */ } } },
   };
 }
