@@ -4,6 +4,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
 import { calcProgressPercentComplex } from './progressCalculator';
+import { computeBaseUpdate } from './baseScoreEngine';
 import { getConfig } from './config';
 import type { Database as SQLDatabase } from 'sql.js';
 
@@ -313,36 +314,25 @@ export class DB {
     const locRaw = (metrics.localScoreRaw ?? row.localScoreRaw ?? null);
     const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
 
-    // Recompute baseScore with reduced reliance on line counts and stronger link to AI/local scores
-    // Hybrid daily increment components（取消按昨日基准的 25% 封顶）：
-    // - Lines component (lower weight): ins*0.8 + del*0.4 with diminishing returns, ~0..60
-    // - AI component: up to 30 points (aiScore 0..100 -> 0..30)
-    // - Local component: absolute contribution up to 40 points
+    // 通过 baseScoreEngine 计算 nextBase/trend
     const yKey = this.getYesterday(date);
     const y = yKey ? await this.getDay(yKey) : null;
     const prevBase = Math.max(100, y?.baseScore || 100);
     const ins = Math.max(0, row.insertions || 0);
     const del = Math.max(0, row.deletions || 0);
-    const rawLines = ins * 0.8 + del * 0.4;
-    const incLines = 60 * (1 - Math.exp(-rawLines / 300));
-    const aiPart = Math.max(0, Math.min(30, (typeof ai === 'number' ? ai : 0) * 0.3));
-    // Absolute local contribution (0..40), decoupled from prevBase to avoid always-0 when prevBase is high
-    const locAbs = Math.max(0, Math.min(100, (typeof loc === 'number' ? loc : 0)));
-    const incLocal = Math.max(0, Math.min(40, locAbs * 0.4));
-    const dailyInc = incLines + aiPart + incLocal;
-    // When overwriting today (from summary), start from prevBase to allow lowering from a previously higher base
-    const currentBase = opts?.overwriteToday ? prevBase : Math.max(prevBase, Math.max(100, row.baseScore || 0));
-    // Limit total daily gain to configured ratio of yesterday's base, accounting for any gain already applied today
     const cfg = await getConfig();
     const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
-    const maxDailyAllowance = prevBase * ratio;
-    const alreadyGained = Math.max(0, currentBase - prevBase);
-    let remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
-    // Avoid floating epsilon causing ghost +1 when allowance is effectively zero
-    if (remainingAllowance < 1) remainingAllowance = 0;
-    const incCapped = Math.min(Math.max(0, dailyInc), remainingAllowance);
-    const incApplied = (remainingAllowance <= 0) ? 0 : (incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped));
-    const nextBase = currentBase + incApplied;
+    // overwriteToday 时，从 prevBase 开始计算，否则从当前记录的 baseScore
+    const currentBase = opts?.overwriteToday ? prevBase : Math.max(prevBase, Math.max(100, row.baseScore || 0));
+    const res = computeBaseUpdate({
+      prevBase,
+      currentBase,
+      insertions: ins,
+      deletions: del,
+      aiScore: (typeof ai === 'number' ? ai : 0),
+      localScore: (typeof loc === 'number' ? loc : 0),
+      cfg: { dailyCapRatio: ratio },
+    });
     try {
       if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] setDayMetrics cap', {
         date,
@@ -350,18 +340,19 @@ export class DB {
         currentBase,
         ins,
         del,
-        incLines: Math.round(incLines),
-        aiPart: Math.round(aiPart),
-        incLocal: Math.round(incLocal),
-        dailyInc: Math.round(dailyInc),
-        maxDailyAllowance: Math.round(maxDailyAllowance),
-        alreadyGained: Math.round(alreadyGained),
-        remainingAllowance: Math.round(remainingAllowance),
-        incApplied,
-        nextBase,
+        incLines: res.debug?.incLines,
+        aiPart: res.debug?.aiPart,
+        incLocal: res.debug?.incLocal,
+        dailyInc: res.debug?.dailyInc,
+        maxDailyAllowance: res.debug?.maxDailyAllowance,
+        alreadyGained: res.debug?.alreadyGained,
+        remainingAllowance: res.debug?.remainingAllowance,
+        incApplied: res.debug?.incApplied,
+        nextBase: res.nextBase,
       });
     } catch {}
-    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : incApplied;
+    const nextBase = res.nextBase;
+    const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
 
     // If today's summary already exists and we're not explicitly overwriting, do NOT change base/trend here
     if (row.lastGenAt && !opts?.overwriteToday) {

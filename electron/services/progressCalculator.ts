@@ -43,9 +43,10 @@ export function normalizeLocalByECDF(
   if (idx <= 0) pct = 0;
   else if (idx >= n) pct = 1;
   else {
-    const x0 = sorted[idx - 1];
-    const x1 = sorted[idx];
-    const t = x1 === x0 ? 1 : (x - x0) / (x1 - x0);
+    const x0 = sorted[idx - 1]!;
+    const x1 = sorted[idx]!;
+    const denom = (x1 - x0);
+    const t = denom === 0 ? 1 : (x - x0) / denom;
     pct = ((idx - 1) + t) / (n - 1);
   }
   const out = Math.round(100 * pct);
@@ -59,8 +60,10 @@ function quantile(sortedAsc: number[], p: number): number {
   const pos = (n - 1) * clampedP;
   const i = Math.floor(pos);
   const frac = pos - i;
-  if (i + 1 >= n) return sortedAsc[n - 1];
-  return sortedAsc[i] * (1 - frac) + sortedAsc[i + 1] * frac;
+  if (i + 1 >= n) return sortedAsc[n - 1]!;
+  const a = sortedAsc[i]!;
+  const b = sortedAsc[i + 1]!;
+  return a * (1 - frac) + b * frac;
 }
 
 // Return index of x in sorted array, or bitwise complement of insertion point if not found
@@ -68,8 +71,9 @@ function binarySearch(arr: number[], x: number): number {
   let lo = 0, hi = arr.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (arr[mid] === x) return mid;
-    if (arr[mid] < x) lo = mid + 1; else hi = mid - 1;
+    const v = arr[mid]!;
+    if (v === x) return mid;
+    if (v < x) lo = mid + 1; else hi = mid - 1;
   }
   return ~lo;
 }
