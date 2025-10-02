@@ -43,7 +43,11 @@ export class DB {
   private logger = getLogger('db');
 
   constructor() {
-    this.filePath = path.join(app.getPath('userData'), 'achievo.sqljs');
+    // Resolve install root: exe directory in packaged app; project cwd in dev
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    const dbDir = path.join(installRoot, 'db');
+    try { if (!fsSync.existsSync(dbDir)) fsSync.mkdirSync(dbDir, { recursive: true }); } catch {}
+    this.filePath = path.join(dbDir, 'achievo.sqljs');
     this.ready = this.init();
   }
 

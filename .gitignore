@@ -6,3 +6,5 @@ release/
 *.log
 .env
 build/
+db/
+cache/

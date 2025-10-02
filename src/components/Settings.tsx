@@ -27,7 +27,9 @@ const Settings: React.FC = () => {
   const [logNamespacesText, setLogNamespacesText] = useState<string>('');
   const [logToFile, setLogToFile] = useState<boolean>(false);
   const [logFileName, setLogFileName] = useState<string>('achievo.log');
-  const [userDataPath, setUserDataPath] = useState<string>('');
+  const [installRoot, setInstallRoot] = useState<string>('');
+  const [logDir, setLogDir] = useState<string>('');
+  const [dbDir, setDbDir] = useState<string>('');
   // Learning curve (local scoring) parameters
   const [lsColdStartN, setLsColdStartN] = useState<number>(3);
   const [lsWindowDays, setLsWindowDays] = useState<number>(30);
@@ -76,9 +78,13 @@ const Settings: React.FC = () => {
     const lfn = (cfg as any).logFileName;
     if (typeof lfn === 'string' && lfn.trim()) setLogFileName(lfn);
     try {
-      if ((window as any).api?.userDataPath) {
-        const p = await (window as any).api.userDataPath();
-        if (typeof p === 'string') setUserDataPath(p);
+      if ((window as any).api?.paths) {
+        const p = await (window as any).api.paths();
+        if (p && typeof p === 'object') {
+          setInstallRoot(p.installRoot || '');
+          setLogDir(p.logDir || '');
+          setDbDir(p.dbDir || '');
+        }
       }
     } catch {}
     const ls = (cfg as any).localScoring || {};
@@ -274,21 +280,50 @@ const Settings: React.FC = () => {
               placeholder="achievo.log"
               disabled={!logToFile}
             />
-            <p className="text-xs text-slate-500 mt-1">文件将保存在应用数据目录（userData）下。</p>
+            <p className="text-xs text-slate-500 mt-1">文件将保存在下方“日志目录”中（保存时会按时间戳生成新文件）。</p>
           </div>
           <div className="col-span-1 flex flex-col gap-2">
-            <label className="block text-xs text-slate-400 mb-1">应用数据目录</label>
+            <label className="block text-xs text-slate-400 mb-1">安装目录</label>
             <div className="flex items-center gap-2">
               <button
-                onClick={async ()=>{ try { const p = await (window as any).api.userDataPath(); setUserDataPath(p||''); } catch{} }}
+                onClick={async ()=>{ try { const p = await (window as any).api.installRoot(); setInstallRoot(p||''); } catch{} }}
                 className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
-              >显示路径</button>
+              >刷新路径</button>
               <button
-                onClick={async ()=>{ try { await (window as any).api.openUserData(); } catch{} }}
+                onClick={async ()=>{ try { await (window as any).api.openInstallRoot(); } catch{} }}
                 className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
               >打开目录</button>
             </div>
-            {userDataPath && <p className="text-xs text-slate-400 break-all mt-1">{userDataPath}</p>}
+            {installRoot && <p className="text-xs text-slate-400 break-all mt-1">{installRoot}</p>}
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">日志目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.paths(); setLogDir(p?.logDir||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >刷新路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openLogDir(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {logDir && <p className="text-xs text-slate-400 break-all mt-1">{logDir}</p>}
+            <p className="text-xs text-slate-500 mt-1">当前日志文件将保存为：YYYYMMDD-HHMMSS_{logFileName}</p>
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">数据库目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.paths(); setDbDir(p?.dbDir||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >刷新路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openDbDir(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {dbDir && <p className="text-xs text-slate-400 break-all mt-1">{dbDir}\achievo.sqljs</p>}
           </div>
         </div>
       </section>

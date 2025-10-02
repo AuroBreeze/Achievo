@@ -56,7 +56,9 @@ export function setLogFile(path: string | null) {
 
 function writeJsonl(ns: string, level: LogLevel, payload: any) {
   if (!filePath || !fsAsync) return;
-  const line = JSON.stringify({ ts: Date.now(), ns, level, ...payload }) + '\n';
+  const now = Date.now();
+  const ts_iso = new Date(now).toISOString();
+  const line = JSON.stringify({ ts: now, ts_iso, ns, level, ...payload }) + '\n';
   // Serialize writes to avoid interleaving
   writeQueue = writeQueue.then(() => fsAsync!.appendFile(filePath as string, line, 'utf-8')).catch(()=>{});
 }

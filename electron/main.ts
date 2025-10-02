@@ -13,6 +13,7 @@ import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
 import { applyLoggerConfig, setLogFile, getLogger } from './services/logger';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
@@ -32,6 +33,34 @@ jobManager.onProgress((job) => {
   if (win) {
     try { win.webContents.send('summary:job:progress', { id: job.id, progress: job.progress, status: job.status }); } catch {}
   }
+});
+
+ipcMain.handle('app:installRoot', async () => {
+  try {
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    return installRoot;
+  } catch (e:any) {
+    return process.cwd();
+  }
+});
+
+ipcMain.handle('app:paths', async () => {
+  const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+  const logDir = path.join(installRoot, 'cache', 'log');
+  const dbDir = path.join(installRoot, 'db');
+  return { installRoot, logDir, dbDir };
+});
+
+ipcMain.handle('app:openInstallRoot', async () => {
+  try { const r = await shell.openPath(app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd()); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
+
+ipcMain.handle('app:openLogDir', async () => {
+  try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'cache', 'log'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
+
+ipcMain.handle('app:openDbDir', async () => {
+  try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'db'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
 
 // IPC: background job controls
@@ -70,10 +99,17 @@ app.whenReady().then(() => {
   getConfig().then(cfg => {
     applyLoggerConfig({ logLevel: cfg.logLevel as any, logNamespaces: (cfg.logNamespaces as any) || [] });
     try {
-      const p = cfg.logToFile ? path.join(app.getPath('userData'), (cfg.logFileName || 'achievo.log')) : null;
+      const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+      const logDir = path.join(installRoot, 'cache', 'log');
+      try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
+      const ts = new Date();
+      const pad = (n:number)=>String(n).padStart(2,'0');
+      const stamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+      const baseName = (cfg.logFileName || 'achievo.log').replace(/[/\\]/g,'');
+      const p = cfg.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
       setLogFile(p);
       const boot = getLogger('bootstrap');
-      if (boot.enabled.info) boot.info('logger:startup', { userData: app.getPath('userData'), logFile: p, level: cfg.logLevel, namespaces: cfg.logNamespaces });
+      if (boot.enabled.info) boot.info('logger:startup', { installRoot, logDir, logFile: p, level: cfg.logLevel, namespaces: cfg.logNamespaces });
     } catch {}
   }).catch(()=>{});
 
@@ -136,10 +172,17 @@ ipcMain.handle('config:set', async (_evt, cfg: { openaiApiKey?: string; repoPath
   try {
     const merged = await getConfig();
     applyLoggerConfig({ logLevel: merged.logLevel as any, logNamespaces: (merged.logNamespaces as any) || [] });
-    const p = merged.logToFile ? path.join(app.getPath('userData'), (merged.logFileName || 'achievo.log')) : null;
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    const logDir = path.join(installRoot, 'cache', 'log');
+    try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
+    const ts = new Date();
+    const pad = (n:number)=>String(n).padStart(2,'0');
+    const stamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+    const baseName = (merged.logFileName || 'achievo.log').replace(/[/\\]/g,'');
+    const p = merged.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
     setLogFile(p);
     const boot = getLogger('bootstrap');
-    if (boot.enabled.info) boot.info('logger:config:update', { userData: app.getPath('userData'), logFile: p, level: merged.logLevel, namespaces: merged.logNamespaces });
+    if (boot.enabled.info) boot.info('logger:config:update', { installRoot, logDir, logFile: p, level: merged.logLevel, namespaces: merged.logNamespaces });
   } catch {}
   return true;
 });
