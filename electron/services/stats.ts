@@ -1,14 +1,13 @@
 import { DB, DayRow } from './db_sqljs';
 import { getConfig, setConfig } from './config';
+import { GitAnalyzer } from './gitAnalyzer';
+import { db as sharedDb } from './dbInstance';
+import { todayKey as todayKeyUtil } from './dateUtil';
 import { summarizeWithAI } from './aiSummarizer';
 
 function todayKey(): string {
-  // Use LOCAL date to stay consistent with main.ts (summary/diff handlers)
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  // Unified today key from dateUtil
+  return todayKeyUtil();
 }
 
 function computeTotals(days: DayRow[]) {
@@ -85,6 +84,45 @@ export class StatsService {
     await setConfig(cfg);
 
     return { date: today, summary: toSave };
+  }
+
+  // Live Git-based today's insertions/deletions (includes working tree), with DB sync
+  async getTodayLive(): Promise<{ date: string; insertions: number; deletions: number; total: number }> {
+    const cfg = await getConfig();
+    const repo = cfg.repoPath;
+    if (!repo) throw new Error('未设置仓库路径');
+    const git = new GitAnalyzer(repo);
+    const today = todayKey();
+    const ns = await git.getNumstatSinceDate(today);
+    // Persist to DB for real-time baseScore/trend
+    try {
+      await sharedDb.setDayCounts(today, ns.insertions, ns.deletions);
+      try {
+        const row = await sharedDb.getDay(today);
+        if (row && (typeof row.aiScore === 'number' || typeof row.localScore === 'number')) {
+          await sharedDb.setDayMetrics(today, { aiScore: row.aiScore ?? undefined, localScore: row.localScore ?? undefined, progressPercent: row.progressPercent ?? undefined });
+        }
+      } catch {}
+    } catch {}
+    const total = Math.max(0, (ns.insertions || 0)) + Math.max(0, (ns.deletions || 0));
+    return { date: today, insertions: ns.insertions, deletions: ns.deletions, total };
+  }
+
+  // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
+  async getTotalsLive(): Promise<{ insertions: number; deletions: number; total: number }> {
+    const cfg = await getConfig();
+    const repo = cfg.repoPath;
+    if (!repo) throw new Error('未设置仓库路径');
+    const git = new GitAnalyzer(repo);
+    const today = todayKey();
+    const totals = await sharedDb.getTotals();
+    const todayRow = await sharedDb.getDay(today);
+    const live = await git.getNumstatSinceDate(today);
+    const dbTodayIns = todayRow?.insertions || 0;
+    const dbTodayDel = todayRow?.deletions || 0;
+    const adjIns = Math.max(0, (totals.insertions || 0) - dbTodayIns + live.insertions);
+    const adjDel = Math.max(0, (totals.deletions || 0) - dbTodayDel + live.deletions);
+    return { insertions: adjIns, deletions: adjDel, total: adjIns + adjDel };
   }
 }
 

@@ -21,15 +21,15 @@
   - [ ] API：`generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }): Promise<Result>`
   - [ ] API：`buildTodayUnifiedDiff(): Promise<{ date: string; diff: string }>`
 
-- [ ] JobManager（`services/jobManager.ts`）
+- [x] JobManager（`services/jobManager.ts`）
   - [ ] 后台任务状态机：`idle|running|done|error`、`progress 0..100`、`startedAt/finishedAt`、`error`、`result`。
   - [ ] `startTodaySummaryJob(run: () => Promise<Result>, emit: (p:number)=>void)`（幂等）
   - [ ] `getTodayJobStatus()`
 
-- [ ] WindowService（`services/window.ts`）
+- [x] WindowService（`services/window.ts`）
   - [ ] 统一创建 `BrowserWindow` 与系统集成（隐藏菜单栏、转发 `window:maximize-changed` 等）。
 
-- [ ] StatsService 扩展（`services/stats.ts`）
+- [x] StatsService 扩展（`services/stats.ts`）
   - [ ] 保留：`getToday()/getRange()/generateOnDemandSummary()`。
   - [ ] 补齐：`getTodayLive()`、`getTotalsLive()` 的核心逻辑迁入 service，`main.ts` 仅做 IPC 转发。
 
@@ -53,10 +53,10 @@
 ## 迁移步骤（小步快跑，可回滚）
 - [x] 抽出 `dateUtil.ts` 与 `progressCalculator.ts`，替换 `main.ts` 内部调用。
 - [x] 新建 `summaryService.ts`，将 `summary:todayDiff` 与 `runTodaySummaryJob()` 流程迁入，`main.ts` 改为调用 service。
-- [ ] 新建 `jobManager.ts`，`summary:job:start`/`status` 与事件发射逻辑迁入。
-- [ ] 扩展 `stats.ts`，把 `getTodayLive`/`getTotalsLive` 核心逻辑迁入，`main.ts` 只转发。
-- [ ] 新建 `window.ts`，抽离窗口创建与事件绑定。
-- [ ] 清理 `main.ts` imports 与冗余逻辑，保留 IPC 注册与生命周期管理。
+- [x] 新建 `jobManager.ts`，`summary:job:start`/`status` 与事件发射逻辑迁入。
+- [x] 扩展 `stats.ts`，把 `getTodayLive`/`getTotalsLive` 核心逻辑迁入，`main.ts` 只转发。
+- [x] 新建 `window.ts`，抽离窗口创建与事件绑定。
+- [x] 清理 `main.ts` imports 与冗余逻辑，保留 IPC 注册与生命周期管理。
 
 ## 测试与验收
 - [ ] 单测：`progressCalculator` 各边界：昨日为 0、缺失、正常、上限裁剪 25%。
