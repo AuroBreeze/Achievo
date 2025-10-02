@@ -176,6 +176,7 @@ const Dashboard: React.FC = () => {
   const [aiTokens, setAiTokens] = useState<number | null>(null);
   const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
   const [jobProgress, setJobProgress] = useState<number>(0);
+  const [pollSeconds, setPollSeconds] = useState<number>(10);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -271,21 +272,39 @@ const Dashboard: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    // Ensure live -> then fetch today so recomputed base/trend are visible immediately
+    // initial fetch + apply configured poll interval from config
     (async () => {
+      try {
+        if (window.api?.getConfig) {
+          const cfg: any = await window.api.getConfig();
+          const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
+          setPollSeconds(dps);
+        }
+      } catch {}
       await loadTodayLive();
       await loadToday();
       await loadTotals();
       await loadDailyRange();
     })();
+    // listen for config changes
+    const onCfg = (e: any) => {
+      const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
+      if (dps) setPollSeconds(dps);
+    };
+    window.addEventListener('config:updated' as any, onCfg as any);
+    return () => { window.removeEventListener('config:updated' as any, onCfg as any); };
+  }, [loadDailyRange]);
+
+  React.useEffect(() => {
+    const ms = Math.max(1000, (pollSeconds || 10) * 1000);
     const id = setInterval(async () => {
       await loadTodayLive();
       await loadToday();
       await loadTotals();
       await loadDailyRange();
-    }, 10000);
+    }, ms);
     return () => clearInterval(id);
-  }, [loadDailyRange]);
+  }, [pollSeconds, loadDailyRange]);
 
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
