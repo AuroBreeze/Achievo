@@ -49,21 +49,6 @@
 
 ## 迁移步骤（小步快跑，可回滚）
 - [x] 抽出 `dateUtil.ts` 与 `progressCalculator.ts`，替换 `main.ts` 内部调用。
-- [x] 新建 `summaryService.ts`，将 `summary:todayDiff` 与 `runTodaySummaryJob()` 流程迁入，`main.ts` 改为调用 service。
-- [x] 新建 `jobManager.ts`，`summary:job:start`/`status` 与事件发射逻辑迁入。
-- [x] 扩展 `stats.ts`，把 `getTodayLive`/`getTotalsLive` 核心逻辑迁入，`main.ts` 只转发。
-- [x] 新建 `window.ts`，抽离窗口创建与事件绑定。
-- [x] 清理 `main.ts` imports 与冗余逻辑，保留 IPC 注册与生命周期管理。
-
-# 注：已不再规划/追踪“分数/进步百分比”等口径，后续计划仅关注改动计数与架构质量。
-
-## 测试与验收
-- [ ] 单测：`dateUtil` 键值与跨天边界。
-- [ ] 集成：`summaryService.generateTodaySummary()` 在模拟仓库（小/大 diff）下运行，验证分片进度回调与最终持久化。
-- [ ] 集成：`stats.getTodayLive()/getTotalsLive()` 与 DB/工作区变更一致性。
-- [ ] 端到端：启动 dev/打包后点击“生成今日总结”，切页返回看到进度，完成后看到结果与元信息。
-
-## 打包与部署
 - [ ] `asarUnpack: ["node_modules/sql.js/dist/**"]` 保持；`locateFile()` dev/prod 兼容。
 - [ ] `vite.config.ts` 保持 `base: './'`，避免 file:// 白屏。
 - [ ] 镜像变量：`ELECTRON_MIRROR`、`ELECTRON_BUILDER_BINARIES_MIRROR`。
