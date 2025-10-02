@@ -176,6 +176,7 @@ const Dashboard: React.FC = () => {
   const [aiTokens, setAiTokens] = useState<number | null>(null);
   const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
   const [jobProgress, setJobProgress] = useState<number>(0);
+  const [pollSeconds, setPollSeconds] = useState<number>(10);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -184,7 +185,6 @@ const Dashboard: React.FC = () => {
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
-    else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
     if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
     // update AI meta from DB (do not rely on truthy checks)
     if (t) {
@@ -271,21 +271,39 @@ const Dashboard: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    // Ensure live -> then fetch today so recomputed base/trend are visible immediately
+    // initial fetch + apply configured poll interval from config
     (async () => {
+      try {
+        if (window.api?.getConfig) {
+          const cfg: any = await window.api.getConfig();
+          const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
+          setPollSeconds(dps);
+        }
+      } catch {}
       await loadTodayLive();
       await loadToday();
       await loadTotals();
       await loadDailyRange();
     })();
+    // listen for config changes
+    const onCfg = (e: any) => {
+      const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
+      if (dps) setPollSeconds(dps);
+    };
+    window.addEventListener('config:updated' as any, onCfg as any);
+    return () => { window.removeEventListener('config:updated' as any, onCfg as any); };
+  }, [loadDailyRange]);
+
+  React.useEffect(() => {
+    const ms = Math.max(1000, (pollSeconds || 10) * 1000);
     const id = setInterval(async () => {
       await loadTodayLive();
       await loadToday();
       await loadTotals();
       await loadDailyRange();
-    }, 10000);
+    }, ms);
     return () => clearInterval(id);
-  }, [loadDailyRange]);
+  }, [pollSeconds, loadDailyRange]);
 
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
@@ -295,7 +313,7 @@ const Dashboard: React.FC = () => {
       setJobProgress(typeof progress === 'number' ? progress : 0);
       if (status === 'done') {
         try {
-          const job: any = await window.api.getSummaryJobStatus();
+          const job: any = await window.api?.getSummaryJobStatus?.();
           const r = job?.result;
           if (r) {
             setTodayText(String(r.summary || ''));
@@ -319,7 +337,7 @@ const Dashboard: React.FC = () => {
     });
     (async () => {
       try {
-        const job: any = await window.api.getSummaryJobStatus();
+        const job: any = await window.api?.getSummaryJobStatus?.();
         setTodayBusy(job?.status === 'running');
         setJobProgress(typeof job?.progress === 'number' ? job.progress : 0);
         if (job?.status === 'done' && job?.result) {

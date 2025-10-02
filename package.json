@@ -1,6 +1,6 @@
 {
   "name": "achievo",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Achievo - 代码进步追踪器 (Electron + React + Tailwind + TypeScript)",
   "main": "dist-electron/main.cjs",

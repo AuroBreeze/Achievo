@@ -11,6 +11,8 @@ export type AppConfig = {
   aiModel?: string; // e.g., gpt-4o-mini, deepseek-chat
   aiBaseUrl?: string; // for deepseek/custom provider
   aiApiKey?: string; // generic ai key; fallback chain: aiApiKey -> openaiApiKey -> env
+  // Dashboard polling interval for DB/live stats (seconds)
+  dbPollSeconds?: number;
 };
 
 const defaults: AppConfig = {
@@ -18,6 +20,7 @@ const defaults: AppConfig = {
   lastSummaryDate: null,
   aiProvider: 'openai',
   aiModel: 'gpt-4o-mini',
+  dbPollSeconds: 10,
 };
 
 function configPath() {

@@ -20,6 +20,7 @@ const Settings: React.FC = () => {
   const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
   const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
+  const [dbPollSeconds, setDbPollSeconds] = useState<number>(10);
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState<TrackingStatus>({ running: false });
   const [busy, setBusy] = useState(false);
@@ -43,6 +44,8 @@ const Settings: React.FC = () => {
     if (typeof qrs === 'number' && qrs > 0) setQuoteRefreshSeconds(qrs);
     const qls = (cfg as any).quoteLetterSpacing;
     if (typeof qls === 'number') setQuoteLetterSpacing(qls);
+    const dps = (cfg as any).dbPollSeconds;
+    if (typeof dps === 'number' && dps > 0) setDbPollSeconds(dps);
     const st = await window.api.trackingStatus();
     setStatus(st);
   };
@@ -66,11 +69,12 @@ const Settings: React.FC = () => {
       quoteEnabled,
       quoteRefreshSeconds,
       quoteLetterSpacing,
+      dbPollSeconds,
     } as any);
     setSaved('已保存');
     // notify other parts to apply immediately
     try {
-      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing } }));
+      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds } }));
     } catch {}
     await refresh();
   };
@@ -226,6 +230,30 @@ const Settings: React.FC = () => {
               <span className="text-xs text-slate-400">px</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">竖排时每个字之间的额外间距，支持负值。</p>
+          </div>
+        </div>
+      </section>
+      {/* Card: 数据库/数据刷新 */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">数据库</h3>
+          <span className="text-xs text-slate-400">仪表盘数据刷新</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">数据库轮询间隔（秒）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={5}
+                max={600}
+                value={dbPollSeconds}
+                onChange={e=>setDbPollSeconds(Math.max(5, Math.min(600, parseInt(e.target.value)||10)))}
+                className="w-24 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
+              <span className="text-xs text-slate-400">秒</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">用于仪表盘定时刷新今日/总计/区间数据的间隔。</p>
           </div>
         </div>
       </section>

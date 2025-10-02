@@ -7,7 +7,7 @@ import { DB } from './db_sqljs';
 import { db } from './dbInstance';
 import { Storage } from './storage';
 import { todayKey } from './dateUtil';
-import { calcProgressPercentByPrevLocal } from './progressCalculator';
+import { calcProgressPercentByPrevLocal, calcProgressPercentComplex, normalizeLocalGaussian } from './progressCalculator';
 
 export type SummaryResult = {
   date: string;
@@ -46,7 +46,9 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Build unified diff and semantic features first
   const diff = await git.getUnifiedDiffSinceDate(today);
   const feats = extractDiffFeatures(diff);
-  const localScore = scoreFromFeatures(feats);
+  const localScoreRaw = scoreFromFeatures(feats);
+  // Apply Gaussian-like normalization so local score has easier mid-range growth and harder tail
+  const localScore = normalizeLocalGaussian(localScoreRaw, { midpoint: 60, slope: 12 });
 
   // Previous baseline (base + local)
   let prevBase = 0;
@@ -88,13 +90,32 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
     markdown = summaryRes.text || '';
   }
 
-  // Compute progress percent vs yesterday localScore (Scheme B)
-  let progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25 });
-
-  // Persist counts & summary & metrics & meta
+  // Compute blended progress percent using trend, prevBase, local/localScore, aiScore, and total changes
+  const hasChanges = (ns.insertions + ns.deletions) > 0 || (localScore > 0) || (feats.hunks > 0);
+  // Persist counts first so today's trend/base are up-to-date
   try {
     await db.setDayCounts(today, ns.insertions, ns.deletions);
   } catch {}
+  let progressPercent = 0;
+  try {
+    const todayRow = await db.getDay(today);
+    const trend = Math.max(0, todayRow?.trend || 0);
+    progressPercent = calcProgressPercentComplex({
+      trend,
+      prevBase,
+      localScore,
+      aiScore,
+      totalChanges: Math.max(0, ns.insertions + ns.deletions),
+      hasChanges,
+      cap: 25,
+    });
+  } catch {
+    // Fallback to previous local-based percent
+    const prevLocalNorm = (typeof prevLocal === 'number') ? normalizeLocalGaussian(prevLocal, { midpoint: 60, slope: 12 }) : prevLocal;
+    progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocalNorm as any, { defaultDenom: 50, cap: 25, hasChanges });
+  }
+
+  // Persist summary & aggregates & metrics & meta
   try {
     const existed = await db.getDay(today);
     if (!existed) await db.upsertDayAccumulate(today, 0, 0);
@@ -103,7 +124,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   } catch {}
   try {
     const lastGenAt = Date.now();
-    await db.setDayMetrics(today, { aiScore, localScore, progressPercent });
+    await db.setDayMetrics(today, { aiScore, localScore, progressPercent }, { overwriteToday: true });
     const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
       ? summaryRes.tokens
       : Math.max(1, Math.round((markdown?.length || 0) / 4));
