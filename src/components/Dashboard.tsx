@@ -185,7 +185,6 @@ const Dashboard: React.FC = () => {
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
-    else if (typeof t?.baseScore === 'number') setScoreAi(t.baseScore); // fallback to cumulative base
     if (typeof t?.progressPercent === 'number') setProgressPercent(t.progressPercent);
     // update AI meta from DB (do not rely on truthy checks)
     if (t) {

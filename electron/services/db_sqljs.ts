@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
+import { calcProgressPercentComplex } from './progressCalculator';
 import type { Database as SQLDatabase } from 'sql.js';
 
 // Daily increment cap ratio relative to yesterday's base (e.g., 0.2 = 20%)
@@ -68,22 +69,53 @@ export class DB {
     const exists = await this.getDay(date);
     if (!exists) {
       const trend = yesterday ? Math.round(baseCandidate - yesterday.baseScore) : 0;
-      this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [date, ins, del, baseCandidate, trend, null, now, now]);
+      // progressPercent derives from complex model using existing (null) ai/local as 0
+      const hasChanges = (ins + del) > 0;
+      const progressPercent = calcProgressPercentComplex({
+        trend,
+        prevBase,
+        localScore: 0,
+        aiScore: 0,
+        totalChanges: ins + del,
+        hasChanges,
+        cap: 25,
+      });
+      this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, progressPercent, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [date, ins, del, baseCandidate, trend, progressPercent, null, now, now]);
     } else {
       // If today's summary has been generated (lastGenAt present), do NOT mutate baseScore here.
       // Summary becomes authoritative for today's base/trend.
       if (typeof exists.lastGenAt === 'number') {
         const keepBase = Math.max(100, exists.baseScore || 0);
         const trend = yesterday ? Math.round(keepBase - yesterday.baseScore) : 0;
-        this.db.run(`UPDATE days SET insertions=?, deletions=?, trend=?, updatedAt=? WHERE date=?`,
-          [ins, del, trend, now, date]);
+        const hasChanges = (ins + del) > 0;
+        const progressPercent = calcProgressPercentComplex({
+          trend,
+          prevBase,
+          localScore: Math.max(0, exists.localScore ?? 0),
+          aiScore: Math.max(0, exists.aiScore ?? 0),
+          totalChanges: ins + del,
+          hasChanges,
+          cap: 25,
+        });
+        this.db.run(`UPDATE days SET insertions=?, deletions=?, trend=?, progressPercent=?, updatedAt=? WHERE date=?`,
+          [ins, del, trend, progressPercent, now, date]);
       } else {
         // Do not let baseScore regress due to periodic line-only recomputation
         const safeBase = Math.max(Math.max(100, exists.baseScore || 0), baseCandidate);
         const trend = yesterday ? Math.round(safeBase - yesterday.baseScore) : 0;
-        this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
-          [ins, del, safeBase, trend, now, date]);
+        const hasChanges = (ins + del) > 0;
+        const progressPercent = calcProgressPercentComplex({
+          trend,
+          prevBase,
+          localScore: Math.max(0, exists.localScore ?? 0),
+          aiScore: Math.max(0, exists.aiScore ?? 0),
+          totalChanges: ins + del,
+          hasChanges,
+          cap: 25,
+        });
+        this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, progressPercent=?, updatedAt=? WHERE date=?`,
+          [ins, del, safeBase, trend, progressPercent, now, date]);
       }
     }
     await this.persist();

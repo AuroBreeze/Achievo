@@ -7,7 +7,7 @@ import { DB } from './db_sqljs';
 import { db } from './dbInstance';
 import { Storage } from './storage';
 import { todayKey } from './dateUtil';
-import { calcProgressPercentByPrevLocal, calcProgressPercentComplex } from './progressCalculator';
+import { calcProgressPercentByPrevLocal, calcProgressPercentComplex, normalizeLocalGaussian } from './progressCalculator';
 
 export type SummaryResult = {
   date: string;
@@ -46,7 +46,9 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Build unified diff and semantic features first
   const diff = await git.getUnifiedDiffSinceDate(today);
   const feats = extractDiffFeatures(diff);
-  const localScore = scoreFromFeatures(feats);
+  const localScoreRaw = scoreFromFeatures(feats);
+  // Apply Gaussian-like normalization so local score has easier mid-range growth and harder tail
+  const localScore = normalizeLocalGaussian(localScoreRaw, { midpoint: 60, slope: 12 });
 
   // Previous baseline (base + local)
   let prevBase = 0;
@@ -109,7 +111,8 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
     });
   } catch {
     // Fallback to previous local-based percent
-    progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25, hasChanges });
+    const prevLocalNorm = (typeof prevLocal === 'number') ? normalizeLocalGaussian(prevLocal, { midpoint: 60, slope: 12 }) : prevLocal;
+    progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocalNorm as any, { defaultDenom: 50, cap: 25, hasChanges });
   }
 
   // Persist summary & aggregates & metrics & meta

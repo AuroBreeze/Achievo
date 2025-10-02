@@ -15,6 +15,18 @@ export function calcProgressPercentByPrevLocal(
   return pct;
 }
 
+// Normalize a raw local semantic score (0..100) to a "Gaussian-like" distribution via logistic S-curve.
+// Midpoint controls where growth slows (default around 60), slope controls steepness of the S curve.
+export function normalizeLocalGaussian(rawLocal: number, opts?: { midpoint?: number; slope?: number }): number {
+  const x = Math.max(0, Math.min(100, rawLocal));
+  const r = x / 100; // 0..1
+  const mid = typeof opts?.midpoint === 'number' ? Math.max(0, Math.min(100, opts.midpoint)) / 100 : 0.6;
+  const k = typeof opts?.slope === 'number' ? Math.max(1, opts.slope) : 12; // larger => steeper
+  const y = 1 / (1 + Math.exp(-k * (r - mid))); // 0..1
+  const out = Math.round(100 * y);
+  return Math.max(0, Math.min(100, out));
+}
+
 // Complex blended model combining: trend vs prevBase, localScore, aiScore, totalChanges
 // Returns percent in 0..cap, enforces min 1% when hasChanges
 export function calcProgressPercentComplex(params: {
@@ -47,6 +59,15 @@ export function calcProgressPercentComplex(params: {
 
   const score = wTrend * trendNorm + wLocal * localNorm + wAI * aiNorm + wChanges * changesNorm;
   let pct = Math.round(cap * score);
+  // Make gains beyond 21% increasingly hard with smooth exponential easing towards cap
+  const hardThreshold = 21; // percent
+  if (pct > hardThreshold) {
+    const extra = pct - hardThreshold;
+    const lambda = 0.15; // larger => faster approach to cap; tune for normal-like tail
+    const span = cap - hardThreshold;
+    const eased = span * (1 - Math.exp(-lambda * extra));
+    pct = Math.round(hardThreshold + Math.min(span, Math.max(0, eased)));
+  }
   if (pct < 0) pct = 0;
   if (params.hasChanges && pct < 1) pct = 1;
   if (pct > cap) pct = cap;
