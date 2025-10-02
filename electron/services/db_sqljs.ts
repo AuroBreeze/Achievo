@@ -6,8 +6,8 @@ import initSqlJs from 'sql.js';
 import { calcProgressPercentComplex } from './progressCalculator';
 import type { Database as SQLDatabase } from 'sql.js';
 
-// Daily increment cap ratio relative to yesterday's base (e.g., 0.2 = 20%)
-const DAILY_CAP_RATIO = 0.2;
+// Daily increment cap ratio relative to yesterday's base (e.g., 0.35 = 35%)
+const DAILY_CAP_RATIO = 0.35;
 
 export type DayRow = {
   date: string; // YYYY-MM-DD
