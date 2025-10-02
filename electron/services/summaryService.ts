@@ -7,7 +7,7 @@ import { DB } from './db_sqljs';
 import { db } from './dbInstance';
 import { Storage } from './storage';
 import { todayKey } from './dateUtil';
-import { calcProgressPercentByPrevLocal, calcProgressPercentComplex, normalizeLocalGaussian } from './progressCalculator';
+import { calcProgressPercentByPrevLocal, calcProgressPercentComplex, normalizeLocalByECDF, normalizeLocalNormalCDF } from './progressCalculator';
 
 export type SummaryResult = {
   date: string;
@@ -47,8 +47,18 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   const diff = await git.getUnifiedDiffSinceDate(today);
   const feats = extractDiffFeatures(diff);
   const localScoreRaw = scoreFromFeatures(feats);
-  // Apply Gaussian-like normalization so local score has easier mid-range growth and harder tail
-  const localScore = normalizeLocalGaussian(localScoreRaw, { midpoint: 60, slope: 12 });
+  // Build history window for ECDF (last 30 days, excluding today)
+  const startDate = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 30); return d.toISOString().slice(0,10); })();
+  const historyRows = await db.getDaysRange(startDate, today);
+  const samples: number[] = (historyRows || [])
+    .filter(r => r.date !== today && typeof (r as any).localScoreRaw === 'number')
+    .map(r => (r as any).localScoreRaw as number);
+  const coldStart = samples.length < 3; // N=3 warmup
+  const cap = coldStart ? 98 : 85;
+  // Prefer ECDF percentile; fallback to Normal CDF when samples are insufficient
+  let localScore = coldStart
+    ? Math.min(cap, Math.round(normalizeLocalNormalCDF(localScoreRaw, { mean: 88, std: 14 }) * 0.9))
+    : normalizeLocalByECDF(localScoreRaw, samples, { cap, winsor: { pLow: 0.05, pHigh: 0.95 } });
 
   // Previous baseline (base + local)
   let prevBase = 0;
@@ -59,6 +69,21 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
       const prev = await db.getDay(y);
       prevBase = prev?.baseScore || 0;
       prevLocal = typeof prev?.localScore === 'number' ? (prev.localScore as number) : 0;
+    }
+  } catch {}
+
+  // History-aware damping to avoid hovering near 100 across days
+  try {
+    const prevLocalNorm = coldStart
+      ? Math.min(cap, Math.round(normalizeLocalNormalCDF(prevLocal, { mean: 88, std: 14 }) * 0.9))
+      : normalizeLocalByECDF(prevLocal, samples, { cap, winsor: { pLow: 0.05, pHigh: 0.95 } });
+    // Blend current with previous to smooth spikes; more weight on current
+    const alpha = 0.65; // 0..1, higher trusts current more
+    const blended = Math.round(alpha * localScore + (1 - alpha) * prevLocalNorm);
+    localScore = Math.min(localScore, blended);
+    // If yesterday extremely high, enforce regression-to-mean cap today
+    if (typeof prevLocal === 'number' && prevLocal >= 95) {
+      localScore = Math.min(localScore, 80);
     }
   } catch {}
 
@@ -111,7 +136,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
     });
   } catch {
     // Fallback to previous local-based percent
-    const prevLocalNorm = (typeof prevLocal === 'number') ? normalizeLocalGaussian(prevLocal, { midpoint: 60, slope: 12 }) : prevLocal;
+    const prevLocalNorm = (typeof prevLocal === 'number') ? Math.min(85, Math.round(normalizeLocalNormalCDF(prevLocal, { mean: 88, std: 14 }) * 0.9)) : prevLocal;
     progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocalNorm as any, { defaultDenom: 50, cap: 25, hasChanges });
   }
 
@@ -124,7 +149,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   } catch {}
   try {
     const lastGenAt = Date.now();
-    await db.setDayMetrics(today, { aiScore, localScore, progressPercent }, { overwriteToday: true });
+    await db.setDayMetrics(today, { aiScore, localScore, localScoreRaw, progressPercent }, { overwriteToday: true });
     const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
       ? summaryRes.tokens
       : Math.max(1, Math.round((markdown?.length || 0) / 4));

@@ -19,6 +19,7 @@ export type DayRow = {
   summary?: string | null;
   aiScore?: number | null;
   localScore?: number | null;
+  localScoreRaw?: number | null;
   progressPercent?: number | null;
   // meta
   aiModel?: string | null;
@@ -168,6 +169,7 @@ export class DB {
         summary TEXT,
         aiScore INTEGER,
         localScore INTEGER,
+        localScoreRaw INTEGER,
         progressPercent INTEGER,
         aiModel TEXT,
         aiProvider TEXT,
@@ -209,6 +211,7 @@ export class DB {
     // Defensive add columns for existing DBs (ignore if already exists)
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiScore INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN localScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE days ADD COLUMN localScoreRaw INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN progressPercent INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiModel TEXT`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiProvider TEXT`); } catch {}
@@ -300,13 +303,14 @@ export class DB {
     await this.persist();
   }
 
-  async setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) {
+  async setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) {
     await this.ready;
     const now = Date.now();
     const row = await this.getDay(date);
     if (!row) return; // ensure row exists before setting
     const ai = (metrics.aiScore ?? row.aiScore ?? null);
     const loc = (metrics.localScore ?? row.localScore ?? null);
+    const locRaw = (metrics.localScoreRaw ?? row.localScoreRaw ?? null);
     const prog = (metrics.progressPercent ?? row.progressPercent ?? null);
 
     // Recompute baseScore with reduced reliance on line counts and stronger link to AI/local scores
@@ -361,11 +365,11 @@ export class DB {
 
     // If today's summary already exists and we're not explicitly overwriting, do NOT change base/trend here
     if (row.lastGenAt && !opts?.overwriteToday) {
-      this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, prog, now, date]);
+      this.db.run(`UPDATE days SET aiScore=?, localScore=?, localScoreRaw=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, locRaw, prog, now, date]);
       await this.persist();
       return;
     }
-    this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);
+    this.db.run(`UPDATE days SET aiScore=?, localScore=?, localScoreRaw=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, locRaw, prog, nextBase, trend, now, date]);
     await this.persist();
   }
 

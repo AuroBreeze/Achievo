@@ -22,6 +22,18 @@ const Settings: React.FC = () => {
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   const [dbPollSeconds, setDbPollSeconds] = useState<number>(10);
   const [dailyCapRatioPct, setDailyCapRatioPct] = useState<number>(35);
+  // Learning curve (local scoring) parameters
+  const [lsColdStartN, setLsColdStartN] = useState<number>(3);
+  const [lsWindowDays, setLsWindowDays] = useState<number>(30);
+  const [lsAlpha, setLsAlpha] = useState<number>(0.65);
+  const [lsCapCold, setLsCapCold] = useState<number>(98);
+  const [lsCapStable, setLsCapStable] = useState<number>(85);
+  const [lsWinsorLow, setLsWinsorLow] = useState<number>(0.05);
+  const [lsWinsorHigh, setLsWinsorHigh] = useState<number>(0.95);
+  const [lsNormalMean, setLsNormalMean] = useState<number>(88);
+  const [lsNormalStd, setLsNormalStd] = useState<number>(14);
+  const [lsRegressionCap, setLsRegressionCap] = useState<number>(80);
+  const [lsHighThreshold, setLsHighThreshold] = useState<number>(95);
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState<TrackingStatus>({ running: false });
   const [busy, setBusy] = useState(false);
@@ -49,6 +61,18 @@ const Settings: React.FC = () => {
     if (typeof dps === 'number' && dps > 0) setDbPollSeconds(dps);
     const dcr = (cfg as any).dailyCapRatio;
     if (typeof dcr === 'number' && dcr >= 0) setDailyCapRatioPct(Math.round(dcr * 100));
+    const ls = (cfg as any).localScoring || {};
+    if (typeof ls.coldStartN === 'number') setLsColdStartN(ls.coldStartN);
+    if (typeof ls.windowDays === 'number') setLsWindowDays(ls.windowDays);
+    if (typeof ls.alpha === 'number') setLsAlpha(ls.alpha);
+    if (typeof ls.capCold === 'number') setLsCapCold(ls.capCold);
+    if (typeof ls.capStable === 'number') setLsCapStable(ls.capStable);
+    if (typeof ls.winsorPLow === 'number') setLsWinsorLow(ls.winsorPLow);
+    if (typeof ls.winsorPHigh === 'number') setLsWinsorHigh(ls.winsorPHigh);
+    if (typeof ls.normalMean === 'number') setLsNormalMean(ls.normalMean);
+    if (typeof ls.normalStd === 'number') setLsNormalStd(ls.normalStd);
+    if (typeof ls.regressionCapAfterHigh === 'number') setLsRegressionCap(ls.regressionCapAfterHigh);
+    if (typeof ls.highThreshold === 'number') setLsHighThreshold(ls.highThreshold);
     const st = await window.api.trackingStatus();
     setStatus(st);
   };
@@ -74,11 +98,40 @@ const Settings: React.FC = () => {
       quoteLetterSpacing,
       dbPollSeconds,
       dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+      localScoring: {
+        coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
+        windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
+        alpha: Math.max(0, Math.min(1, Number(lsAlpha)) || 0.65),
+        capCold: Math.max(0, Math.min(100, Math.floor(lsCapCold || 98))),
+        capStable: Math.max(0, Math.min(100, Math.floor(lsCapStable || 85))),
+        winsorPLow: Math.max(0, Math.min(0.49, Number(lsWinsorLow) || 0.05)),
+        winsorPHigh: Math.max(0.51, Math.min(1, Number(lsWinsorHigh) || 0.95)),
+        normalMean: Math.max(0, Math.min(100, Number(lsNormalMean) || 88)),
+        normalStd: Math.max(1, Math.min(50, Number(lsNormalStd) || 14)),
+        regressionCapAfterHigh: Math.max(0, Math.min(100, Math.floor(lsRegressionCap || 80))),
+        highThreshold: Math.max(0, Math.min(100, Math.floor(lsHighThreshold || 95))),
+      }
     } as any);
     setSaved('已保存');
     // notify other parts to apply immediately
     try {
-      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds, dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)) } }));
+      window.dispatchEvent(new CustomEvent('config:updated', { detail: {
+        quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds,
+        dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+        localScoring: {
+          coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
+          windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
+          alpha: Math.max(0, Math.min(1, Number(lsAlpha)) || 0.65),
+          capCold: Math.max(0, Math.min(100, Math.floor(lsCapCold || 98))),
+          capStable: Math.max(0, Math.min(100, Math.floor(lsCapStable || 85))),
+          winsorPLow: Math.max(0, Math.min(0.49, Number(lsWinsorLow) || 0.05)),
+          winsorPHigh: Math.max(0.51, Math.min(1, Number(lsWinsorHigh) || 0.95)),
+          normalMean: Math.max(0, Math.min(100, Number(lsNormalMean) || 88)),
+          normalStd: Math.max(1, Math.min(50, Number(lsNormalStd) || 14)),
+          regressionCapAfterHigh: Math.max(0, Math.min(100, Math.floor(lsRegressionCap || 80))),
+          highThreshold: Math.max(0, Math.min(100, Math.floor(lsHighThreshold || 95))),
+        }
+      } }));
     } catch {}
     await refresh();
   };
@@ -145,6 +198,65 @@ const Settings: React.FC = () => {
           </div>
         </div>
         <p className="text-xs text-slate-400 mt-2">备注：若未填 AI API Key，将回退到 OpenAI API Key，再回退到环境变量 OPENAI_API_KEY。</p>
+      </section>
+      {/* Card: 学习曲线（本地进步分） */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">学习曲线（本地进步分）</h3>
+          <span className="text-xs text-slate-400">ECDF 分位 + 冷启动 + 平滑</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">冷启动天数 N</label>
+            <input type="number" min={0} max={10} value={lsColdStartN} onChange={e=>setLsColdStartN(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+            <p className="text-xs text-slate-500 mt-1">前 N 天使用正态 CDF 回退，不用历史样本。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">窗口天数 K</label>
+            <input type="number" min={7} max={120} value={lsWindowDays} onChange={e=>setLsWindowDays(parseInt(e.target.value)||30)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+            <p className="text-xs text-slate-500 mt-1">用于计算 ECDF 的历史原始分窗口。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">平滑系数 α (0..1)</label>
+            <input type="number" step={0.05} min={0} max={1} value={lsAlpha} onChange={e=>setLsAlpha(parseFloat(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+            <p className="text-xs text-slate-500 mt-1">最终分 = α·今日 + (1-α)·昨日（归一化）。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">冷启动封顶 capCold</label>
+            <input type="number" min={0} max={100} value={lsCapCold} onChange={e=>setLsCapCold(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">稳态封顶 capStable</label>
+            <input type="number" min={0} max={100} value={lsCapStable} onChange={e=>setLsCapStable(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Winsor pLow</label>
+            <input type="number" step={0.01} min={0} max={0.49} value={lsWinsorLow} onChange={e=>setLsWinsorLow(parseFloat(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Winsor pHigh</label>
+            <input type="number" step={0.01} min={0.51} max={1} value={lsWinsorHigh} onChange={e=>setLsWinsorHigh(parseFloat(e.target.value)||1)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">正态均值（冷启动）</label>
+            <input type="number" min={0} max={100} value={lsNormalMean} onChange={e=>setLsNormalMean(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">正态标准差（冷启动）</label>
+            <input type="number" min={1} max={50} value={lsNormalStd} onChange={e=>setLsNormalStd(parseInt(e.target.value)||1)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">昨日高分回归封顶</label>
+            <input type="number" min={0} max={100} value={lsRegressionCap} onChange={e=>setLsRegressionCap(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">昨日高分阈值</label>
+            <input type="number" min={0} max={100} value={lsHighThreshold} onChange={e=>setLsHighThreshold(parseInt(e.target.value)||0)} className="w-28 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+          </div>
+        </div>
+        <div className="text-xs text-slate-400 mt-3 space-y-1">
+          <p><b>计算要点</b>：稳态使用 ECDF 分位：score = min(capStable, round(100 * percentile(raw, windowDays, Winsor)))；冷启动用正态 CDF 回退：score = min(capCold, round(CDF((raw-μ)/σ) * 100 * 0.9))；最终分采用平滑：final = min(score, round(α*score + (1-α)*yesterday_norm))，且昨日日分≥阈值时，final ≤ 回归封顶。</p>
+        </div>
       </section>
 
       {/* Card: 仓库路径与跟踪 */}

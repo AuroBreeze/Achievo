@@ -3,20 +3,18 @@
 ## 目标
 - [ ] 将 `electron/main.ts` 中的业务逻辑服务化，保持 `main.ts` 专注于窗口生命周期与 IPC 转发。
 - [ ] 任务生成（“今日总结”）在后台稳健运行，切页不中断，进度可感知，可恢复。
-- [ ] 指标口径统一且可解释：基础分、进步百分比、本地/AI 分、今日/累计改动数。
+- [ ] 指标口径统一且可解释：今日/累计改动数（insertions/deletions/total）。
 - [ ] 打包产物在 Windows/macOS/Linux 上稳定可用（WASM/路径/图标/镜像）。
 
 ## 当前问题
 - [ ] `main.ts` 行数多、职责过多（窗口、任务编排、DB 持久化、Git 调用、AI 调用、统计口径）。
 - [ ] 背景任务与 UI 耦合（进度/状态散落），复用难，测试难。
-- [ ] 进步百分比算法与累计基数混用（已改为“方案 B”，与昨日 `localScore` 对比）。
 
 ## 拆分与模块边界
 - [ ] SummaryService（`services/summaryService.ts`）
   - [ ] 读取当日 key、获取 unified diff/numstat（依赖 `GitAnalyzer`）。
-  - [ ] 提取特征、计算 `localScore`（依赖 `diffFeatures.ts`、`progressScorer.ts`）。
+  - [ ] 提取特征（依赖 `diffFeatures.ts`）。
   - [ ] 调用 AI 摘要：优先分片 `summarizeUnifiedDiffChunked`（携带 `onProgress`）。
-  - [ ] 计算 `progressPercent`（方案 B：对比昨日 `localScore`）。
   - [ ] DB 持久化：`setDayCounts`/`setDaySummary`/`setDayMetrics`/`setDayAiMeta`/`updateAggregatesForDate`。
   - [ ] API：`generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }): Promise<Result>`
   - [ ] API：`buildTodayUnifiedDiff(): Promise<{ date: string; diff: string }>`
@@ -35,7 +33,6 @@
 
 - [ ] Utilities
   - [x] `dateUtil.ts`：`todayKey()`、`yesterdayKey(key)`、`toKey(date)`。
-  - [x] `progressCalculator.ts`：`calcProgressPercentByPrevLocal(currentLocal, prevLocal?, defaultDenom=50, cap=25)`。
 
 -## IPC 设计（main.ts 保留）
 - [x] `summary:job:start` / `summary:job:status` / `summary:job:progress`（转调 JobManager + SummaryService）
@@ -58,8 +55,9 @@
 - [x] 新建 `window.ts`，抽离窗口创建与事件绑定。
 - [x] 清理 `main.ts` imports 与冗余逻辑，保留 IPC 注册与生命周期管理。
 
+# 注：已不再规划/追踪“分数/进步百分比”等口径，后续计划仅关注改动计数与架构质量。
+
 ## 测试与验收
-- [ ] 单测：`progressCalculator` 各边界：昨日为 0、缺失、正常、上限裁剪 25%。
 - [ ] 单测：`dateUtil` 键值与跨天边界。
 - [ ] 集成：`summaryService.generateTodaySummary()` 在模拟仓库（小/大 diff）下运行，验证分片进度回调与最终持久化。
 - [ ] 集成：`stats.getTodayLive()/getTotalsLive()` 与 DB/工作区变更一致性。
@@ -76,5 +74,4 @@
 - [ ] 生成任务切页不中断，进度准确（分片级推进）。
 - [ ] 指标口径明确：
   - [ ] “总改动数”= 累计；
-  - [ ] “今日新增/删除/合计”= 当日实时；
-  - [ ] 进步百分比= 方案 B（对比昨日 localScore，封顶 25%）。
+  - [ ] “今日新增/删除/合计”= 当日实时。
