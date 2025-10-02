@@ -7,7 +7,7 @@ import { DB } from './db_sqljs';
 import { db } from './dbInstance';
 import { Storage } from './storage';
 import { todayKey } from './dateUtil';
-import { calcProgressPercentByPrevLocal } from './progressCalculator';
+import { calcProgressPercentByPrevLocal, calcProgressPercentComplex } from './progressCalculator';
 
 export type SummaryResult = {
   date: string;
@@ -88,14 +88,31 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
     markdown = summaryRes.text || '';
   }
 
-  // Compute progress percent vs yesterday localScore (Scheme B)
+  // Compute blended progress percent using trend, prevBase, local/localScore, aiScore, and total changes
   const hasChanges = (ns.insertions + ns.deletions) > 0 || (localScore > 0) || (feats.hunks > 0);
-  let progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25, hasChanges });
-
-  // Persist counts & summary & metrics & meta
+  // Persist counts first so today's trend/base are up-to-date
   try {
     await db.setDayCounts(today, ns.insertions, ns.deletions);
   } catch {}
+  let progressPercent = 0;
+  try {
+    const todayRow = await db.getDay(today);
+    const trend = Math.max(0, todayRow?.trend || 0);
+    progressPercent = calcProgressPercentComplex({
+      trend,
+      prevBase,
+      localScore,
+      aiScore,
+      totalChanges: Math.max(0, ns.insertions + ns.deletions),
+      hasChanges,
+      cap: 25,
+    });
+  } catch {
+    // Fallback to previous local-based percent
+    progressPercent = calcProgressPercentByPrevLocal(localScore, prevLocal, { defaultDenom: 50, cap: 25, hasChanges });
+  }
+
+  // Persist summary & aggregates & metrics & meta
   try {
     const existed = await db.getDay(today);
     if (!existed) await db.upsertDayAccumulate(today, 0, 0);
