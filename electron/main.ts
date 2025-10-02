@@ -102,9 +102,10 @@ app.whenReady().then(() => {
       const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
       const logDir = path.join(installRoot, 'cache', 'log');
       try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
-      const ts = new Date();
+      const now = new Date();
       const pad = (n:number)=>String(n).padStart(2,'0');
-      const stamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+      const half = now.getHours() < 12 ? 'AM' : 'PM';
+      const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${half}`;
       const baseName = (cfg.logFileName || 'achievo.log').replace(/[/\\]/g,'');
       const p = cfg.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
       setLogFile(p);
@@ -175,9 +176,10 @@ ipcMain.handle('config:set', async (_evt, cfg: { openaiApiKey?: string; repoPath
     const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
     const logDir = path.join(installRoot, 'cache', 'log');
     try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
-    const ts = new Date();
+    const now = new Date();
     const pad = (n:number)=>String(n).padStart(2,'0');
-    const stamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
+    const half = now.getHours() < 12 ? 'AM' : 'PM';
+    const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${half}`;
     const baseName = (merged.logFileName || 'achievo.log').replace(/[/\\]/g,'');
     const p = merged.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
     setLogFile(p);
