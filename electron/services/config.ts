@@ -13,6 +13,8 @@ export type AppConfig = {
   aiApiKey?: string; // generic ai key; fallback chain: aiApiKey -> openaiApiKey -> env
   // Dashboard polling interval for DB/live stats (seconds)
   dbPollSeconds?: number;
+  // Daily cap ratio for base score increment (0..1), e.g., 0.35 = 35%
+  dailyCapRatio?: number;
 };
 
 const defaults: AppConfig = {
@@ -21,6 +23,7 @@ const defaults: AppConfig = {
   aiProvider: 'openai',
   aiModel: 'gpt-4o-mini',
   dbPollSeconds: 10,
+  dailyCapRatio: 0.35,
 };
 
 function configPath() {

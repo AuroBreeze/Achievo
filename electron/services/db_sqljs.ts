@@ -4,10 +4,11 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import initSqlJs from 'sql.js';
 import { calcProgressPercentComplex } from './progressCalculator';
+import { getConfig } from './config';
 import type { Database as SQLDatabase } from 'sql.js';
 
-// Daily increment cap ratio relative to yesterday's base (e.g., 0.35 = 35%)
-const DAILY_CAP_RATIO = 0.35;
+// Default daily cap ratio relative to yesterday's base when config is missing
+const DEFAULT_DAILY_CAP_RATIO = 0.35;
 
 export type DayRow = {
   date: string; // YYYY-MM-DD
@@ -65,7 +66,9 @@ export class DB {
     const y = this.getYesterday(date);
     const yesterday = y ? await this.getDay(y) : null;
     const prevBase = Math.max(100, yesterday?.baseScore || 100);
-    const baseCandidate = this.computeCumulativeBase(prevBase, ins, del);
+    const cfg = await getConfig();
+    const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+    const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
     const exists = await this.getDay(date);
     if (!exists) {
       const trend = yesterday ? Math.round(baseCandidate - yesterday.baseScore) : 0;
@@ -221,7 +224,7 @@ export class DB {
     await fs.writeFile(this.filePath, Buffer.from(data));
   }
 
-  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number): number {
+  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number, capRatio: number): number {
     // Daily increment with diminishing returns
     const wAdded = 1.6;
     const wRemoved = 0.8;
@@ -229,12 +232,13 @@ export class DB {
     const alpha = 220;
     const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
     const base0 = Math.max(100, prevBase);
-    // Cap the daily increase to DAILY_CAP_RATIO of previous base
-    const incCapped = Math.min(Math.max(0, dailyInc), base0 * DAILY_CAP_RATIO);
+    // Cap the daily increase to capRatio of previous base
+    const ratio = Number.isFinite(capRatio) && capRatio >= 0 && capRatio <= 1 ? capRatio : DEFAULT_DAILY_CAP_RATIO;
+    const incCapped = Math.min(Math.max(0, dailyInc), base0 * ratio);
     // 避免极小正增量被四舍五入为 0
     const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
     const next = base0 + incApplied;
-    try { console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * DAILY_CAP_RATIO, applied: incApplied, next }); } catch {}
+    try { console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * ratio, applied: incApplied, next }); } catch {}
     return next;
   }
 
@@ -263,7 +267,9 @@ export class DB {
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
-      const baseScore = this.computeCumulativeBase(prevBase, ins, del);
+      const cfg = await getConfig();
+      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const baseScore = this.computeCumulativeBase(prevBase, ins, del, capRatio);
       const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [date, ins, del, baseScore, trend, null, now, now]);
@@ -275,7 +281,9 @@ export class DB {
       const y = this.getYesterday(date);
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
-      const baseCandidate = this.computeCumulativeBase(prevBase, ins, del);
+      const cfg = await getConfig();
+      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
       const safeBase = Math.max(Math.max(100, existing.baseScore || 0), baseCandidate);
       const trend = yesterday ? Math.round(safeBase - yesterday.baseScore) : 0;
       this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
@@ -320,8 +328,10 @@ export class DB {
     const dailyInc = incLines + aiPart + incLocal;
     // When overwriting today (from summary), start from prevBase to allow lowering from a previously higher base
     const currentBase = opts?.overwriteToday ? prevBase : Math.max(prevBase, Math.max(100, row.baseScore || 0));
-    // Limit total daily gain to DAILY_CAP_RATIO of yesterday's base, accounting for any gain already applied today
-    const maxDailyAllowance = prevBase * DAILY_CAP_RATIO;
+    // Limit total daily gain to configured ratio of yesterday's base, accounting for any gain already applied today
+    const cfg = await getConfig();
+    const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+    const maxDailyAllowance = prevBase * ratio;
     const alreadyGained = Math.max(0, currentBase - prevBase);
     let remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
     // Avoid floating epsilon causing ghost +1 when allowance is effectively zero

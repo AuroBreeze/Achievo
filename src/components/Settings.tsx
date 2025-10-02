@@ -21,6 +21,7 @@ const Settings: React.FC = () => {
   const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   const [dbPollSeconds, setDbPollSeconds] = useState<number>(10);
+  const [dailyCapRatioPct, setDailyCapRatioPct] = useState<number>(35);
   const [saved, setSaved] = useState('');
   const [status, setStatus] = useState<TrackingStatus>({ running: false });
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,8 @@ const Settings: React.FC = () => {
     if (typeof qls === 'number') setQuoteLetterSpacing(qls);
     const dps = (cfg as any).dbPollSeconds;
     if (typeof dps === 'number' && dps > 0) setDbPollSeconds(dps);
+    const dcr = (cfg as any).dailyCapRatio;
+    if (typeof dcr === 'number' && dcr >= 0) setDailyCapRatioPct(Math.round(dcr * 100));
     const st = await window.api.trackingStatus();
     setStatus(st);
   };
@@ -70,11 +73,12 @@ const Settings: React.FC = () => {
       quoteRefreshSeconds,
       quoteLetterSpacing,
       dbPollSeconds,
+      dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
     } as any);
     setSaved('已保存');
     // notify other parts to apply immediately
     try {
-      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds } }));
+      window.dispatchEvent(new CustomEvent('config:updated', { detail: { quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds, dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)) } }));
     } catch {}
     await refresh();
   };
@@ -254,6 +258,21 @@ const Settings: React.FC = () => {
               <span className="text-xs text-slate-400">秒</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">用于仪表盘定时刷新今日/总计/区间数据的间隔。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">基础分单日增幅上限（%）</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={dailyCapRatioPct}
+                onChange={e=>setDailyCapRatioPct(Math.max(0, Math.min(100, parseInt(e.target.value)||0)))}
+                className="w-24 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
+              <span className="text-xs text-slate-400">%</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">相对昨日基础分的封顶比例，建议 20% ~ 50%。</p>
           </div>
         </div>
       </section>
