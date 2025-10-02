@@ -47,17 +47,14 @@
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "appx": {
-      "identityName": "TO_REPLACE_IDENTITY_NAME", 
-      "publisher": "CN=TO_REPLACE_PUBLISHER_FROM_PARTNER_CENTER",
+      "identityName": "achievo", 
+      "publisher": "CN=a6f56dab-f4ff-4042-a7a2-53d23d3f62eb",
       "publisherDisplayName": "Achievo",
       "displayName": "Achievo",
       "applicationId": "Achievo",
       "backgroundColor": "#202124",
       "languages": ["zh-CN", "en-US"],
-      "uapCapabilities": [
-        "internetClient",
-        "privateNetworkClientServer"
-      ]
+      "artifactName": "${productName}-${version}-${arch}.msix"
     },
     "mac": {
       "target": [
