@@ -5,6 +5,8 @@
   "description": "Achievo - 代码进步追踪器 (Electron + React + Tailwind + TypeScript)",
   "main": "dist-electron/main.cjs",
   "type": "module",
+  "license": "GPL-3.0-only",
+  "author": "Achievo Contributors",
   "scripts": {
     "dev": "concurrently -n vite,esb,app \"vite --port 5173\" \"npm:dev:electron\" \"wait-on dist-electron/main.cjs tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "dev:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --outdir=dist-electron --external:electron --format=cjs --out-extension:.js=.cjs --watch",

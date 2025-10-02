@@ -7,7 +7,7 @@
     <img src="https://img.shields.io/badge/Electron-31.4.0-blue" alt="Electron">
     <img src="https://img.shields.io/badge/React-18.3-blue" alt="React">
     <img src="https://img.shields.io/badge/TypeScript-5.6-blue" alt="TypeScript">
-    <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
+    <img src="https://img.shields.io/badge/License-GPLv3-green" alt="License">
   </p>
 </div>
 
@@ -26,6 +26,24 @@
 - **📊 可视化图表** - 30 天趋势图、基础分/AI 分对比
 - **⚡ 自动追踪** - 后台定时监控 Git 仓库变更
 - **🎨 现代化 UI** - Tailwind CSS + 渐变主题 + 响应式设计
+
+---
+
+## 📣 What's New — V1.1.1
+
+本次版本聚焦“进度百分比模型优化、分数冻结与体验细节”。完整说明见 `FEATURE.md`。
+
+- **[Features]**
+  - 进度百分比复杂混合模型：融合 `trend/prevBase`、`localScore`（语义分）、`aiScore`、`totalChanges`，并在 21% 后采用指数缓升，避免过快“拉满”。
+  - 本地进步分 Gaussian/Logistic 映射：中段更敏感、尾部更难，符合正态感知；本地/AI 分仅在“生成今日总结”时落库。
+  - 新增“数据库轮询间隔（秒）”设置，仪表盘按该间隔刷新。
+- **[Fixes]**
+  - 修复浮点尾差导致的“基础分 +1 抖动”；总结后非 overwrite 情况下冻结当日 `baseScore/trend`，避免轮询继续顶高。
+  - 修复“昨天”计算的时区偏移；前端为 `window.api` 增加可选链；主内容区域在侧边栏展开时保持在其下方以减少重排。
+- **[Behavior Changes]**
+  - 进度百分比随 DB 轮询实时重算并持久化；单日基础分增幅上限降至 20%（`DAILY_CAP_RATIO`）。
+
+详细变更与提交列表：参见 [`FEATURE.md`](./FEATURE.md)。
 
 ---
 
@@ -202,7 +220,7 @@ DEEPSEEK_API_KEY=sk-...
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 开源协议。
+本项目采用 [GNU General Public License v3.0 (GPL-3.0)](LICENSE) 开源协议。
 
 ---
 
