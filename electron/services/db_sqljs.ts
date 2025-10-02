@@ -323,9 +323,11 @@ export class DB {
     // Limit total daily gain to DAILY_CAP_RATIO of yesterday's base, accounting for any gain already applied today
     const maxDailyAllowance = prevBase * DAILY_CAP_RATIO;
     const alreadyGained = Math.max(0, currentBase - prevBase);
-    const remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
+    let remainingAllowance = Math.max(0, maxDailyAllowance - alreadyGained);
+    // Avoid floating epsilon causing ghost +1 when allowance is effectively zero
+    if (remainingAllowance < 1) remainingAllowance = 0;
     const incCapped = Math.min(Math.max(0, dailyInc), remainingAllowance);
-    const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
+    const incApplied = (remainingAllowance <= 0) ? 0 : (incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped));
     const nextBase = currentBase + incApplied;
     try {
       console.debug('[DB] setDayMetrics cap', {
@@ -347,6 +349,12 @@ export class DB {
     } catch {}
     const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : incApplied;
 
+    // If today's summary already exists and we're not explicitly overwriting, do NOT change base/trend here
+    if (row.lastGenAt && !opts?.overwriteToday) {
+      this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, updatedAt=? WHERE date=?`, [ai, loc, prog, now, date]);
+      await this.persist();
+      return;
+    }
     this.db.run(`UPDATE days SET aiScore=?, localScore=?, progressPercent=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`, [ai, loc, prog, nextBase, trend, now, date]);
     await this.persist();
   }
