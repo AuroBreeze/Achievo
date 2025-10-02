@@ -14,11 +14,12 @@ import { createMainWindow } from './services/window';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-const tracker = new TrackerService();
-const stats = new StatsService();
-
-// Local DB instance (replaces singleton usage)
+// Create a single DB instance and inject into all services to avoid clobbering the sql.js file
 const dbInstance = new DB();
+const tracker = new TrackerService(dbInstance);
+const stats = new StatsService(dbInstance);
+
+// Local DB instance defined above
 
 let win: BrowserWindow | null = null;
 
