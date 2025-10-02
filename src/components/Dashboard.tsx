@@ -313,7 +313,7 @@ const Dashboard: React.FC = () => {
       setJobProgress(typeof progress === 'number' ? progress : 0);
       if (status === 'done') {
         try {
-          const job: any = await window.api.getSummaryJobStatus();
+          const job: any = await window.api?.getSummaryJobStatus?.();
           const r = job?.result;
           if (r) {
             setTodayText(String(r.summary || ''));
@@ -337,7 +337,7 @@ const Dashboard: React.FC = () => {
     });
     (async () => {
       try {
-        const job: any = await window.api.getSummaryJobStatus();
+        const job: any = await window.api?.getSummaryJobStatus?.();
         setTodayBusy(job?.status === 'running');
         setJobProgress(typeof job?.progress === 'number' ? job.progress : 0);
         if (job?.status === 'done' && job?.result) {

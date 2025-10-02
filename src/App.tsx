@@ -273,7 +273,7 @@ function App() {
         </aside>
 
         {/* Main */}
-        <main className={`pt-4 pr-4 pb-4 pl-14 w-full`}> 
+        <main className={`pt-4 pr-4 pb-4 pl-20 w-full`}>
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'history' && (
             <div className="bg-slate-800 rounded p-4 border border-slate-700">
