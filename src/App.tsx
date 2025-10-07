@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import Dashboard from '@/components/Dashboard';
-import Settings from '@/components/Settings';
+import Settings from '@/components/settings/SettingsIndex';
 import Repo from '@/components/Repo';
 import TitleBar from '@/components/TitleBar';
+import ToastContainer from '@/components/ui/Toast';
 
 function App() {
   const [tab, setTab] = useState<'dashboard' | 'repo' | 'history' | 'settings'>('dashboard');
@@ -193,6 +194,7 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <TitleBar />
+      <ToastContainer />
       {/* Sidebar + Content */}
       <div className="relative flex">
         {/* Hover zone to open sidebar when collapsed */}
