@@ -1,57 +1,58 @@
-# Achievo V1.1.2 功能与变更汇总（2025-10-02）
+# Achievo V1.1.3 功能与变更汇总（2025-10-07）
 
-> 本文根据今日（本地时间）的最新工作（含未推送提交）整理，概述新增功能、重构解耦与缺陷修复，便于发布与回顾。
+> 本文根据今日（本地时间）的最新工作（含未推送提交）整理，概述新增功能、交互优化与缺陷修复，便于发布与回顾。
 
 ## 今日概览
-- **[日期]** 2025-10-02
-- **[版本]** 1.1.2（package.json）
-- **[范围]** 服务层解耦（端口/适配器）、评分引擎抽离、基础分引擎抽离、AI 摘要端口化、严格类型修复
+- **[日期]** 2025-10-07
+- **[版本]** 1.1.3
+- **[范围]** 仓库页数据库导入/导出、仓库切换即时刷新、基础分/趋势一致性修复、Windows Git 长路径修复、设置文案与入口调整
 
 ## 主要特性（Features）
-- **[端口/适配器：服务解耦]**
-  - 新增 `Ports` 抽象：`DBPort`、`GitPort`、`SummarizerPort`，以及 `makeDefaultPorts()` 默认装配。
-  - `summaryService.ts` 通过端口注入 `db/git/cfg/summarizer`，去除对单例与具体实现的直接依赖。
-  - 相关文件：`electron/services/ports.ts`、`electron/services/summaryService.ts`。
-- **[本地进步分引擎]**
-  - 新增 `progressEngine.ts`，统一完成 `raw → ECDF/冷启动 → 平滑 → 回归封顶` 的流水线，支持 `ACHIEVO_DEBUG=score` 调试输出。
-  - `summaryService.ts` 改为调用 `computeLocalProgress()`，减少编排器逻辑负担。
-  - 相关文件：`electron/services/progressEngine.ts`、`electron/services/summaryService.ts`。
-- **[基础分引擎]**
-  - 新增 `baseScoreEngine.ts`，将日增/封顶/趋势计算封装为纯函数，数据层仅负责 CRUD 与调用。
-  - `db_sqljs.ts:setDayMetrics()` 接入 `computeBaseUpdate()`，保留原有调试字段结构。
-  - 相关文件：`electron/services/baseScoreEngine.ts`、`electron/services/db_sqljs.ts`。
-- **[AI 摘要端口化]**
-  - `summaryService.ts` 改为通过 `SummarizerPort` 调用 `summarizeUnifiedDiff*()`，移除对 `aiSummarizer.ts` 的直接 import。
-  - 相关文件：`electron/services/ports.ts`、`electron/services/summaryService.ts`、`electron/services/aiSummarizer.ts`（接口兼容）。
+- **[仓库页：数据库导入/导出]**
+  - 在 `Repo.tsx` 将“导出数据库”“导入数据库”与“复制路径/打开数据库目录”并列，统一通过 Toast 反馈结果。
+  - `electron/main.ts` 新增 IPC：`db:export`、`db:import`（导入前自动备份 `.bak.<timestamp>.sqljs`，导入后广播 `db:imported`）。
+  - `electron/preload.ts` 暴露 `dbExport()`、`dbImport()`、`onDbImportedOnce()` 给前端。
+- **[仓库切换：即时清空并重载]**
+  - `Dashboard.tsx` 监听 `config:updated(repoPath)`：
+    - 立刻清空“今日/汇总/趋势/AI 元数据”等状态，避免跨仓数据混淆。
+    - 取消防抖，立即依次拉取 `loadTodayLive()/loadToday()/loadTotals()/loadDailyRange()`。
+    - `loadToday()` 直接从 DB 读取 `summary` 填充，杜绝旧仓库文案残留。
+- **[设置：文案与入口优化]**
+  - `SettingsDatabase.tsx` 将“数据库轮询间隔（秒）”重命名为“仪表盘刷新间隔（秒）”，新增说明文字。
+  - 移除设置页的“导入/导出数据库”按钮，统一在“仓库”页操作，入口更聚合。
 
 ## 缺陷修复（Fixes）
-- **[严格类型与空安全]**
-  - 修复 ECDF/分位数实现的严格空检查（`progressCalculator.ts`），通过非空断言与边界保护消除 TS 报错。
-  - 修正 `ports.ts` 接口签名与适配器实现不一致问题（`DBPort.upsertDayAccumulate`、`GitPort.getNumstatSinceDate`）。
-- **[总结服务稳定性]**
-  - 统一 try/catch、作用域变量与持久化顺序，避免 `lastGenAt/estTokens` 与 `db`/`pdb` 引用不当导致的异常。
+- **[Windows Git：长路径]**
+  - `gitAnalyzer.ts` 在每个仓库首次操作前自动执行 `git config core.longpaths true`（仅 Windows），修复“Filename too long”。
+- **[基线提交解析：避免多行父提交导致的路径误解]**
+  - `gitAnalyzer.ts:getDiffNumstat()` 改用 `rev-parse <toCommit>^` 获取第一父单一哈希，避免将多行输出拼接为路径引发错误。
+- **[基础分与趋势一致性]**
+  - `db_sqljs.ts:setDayCounts()`（当日已有总结 `lastGenAt`）：
+    - 使用回退 `prevBase = max(100, yesterday?.baseScore || 100)`，并以 `trend = keepBase - prevBase` 计算，避免“昨日缺失→趋势=0”。
+  - `db_sqljs.ts:setDayBaseScore()`：与上同一回退策略；去除对 `baseScore` 的 0..100 截断，保留实际值（四舍五入）。
+  - `main.ts:stats:getToday`：若检测到 `trend !== (baseScore - prevBase)`，自动调用 `setDayBaseScore()` 纠正并返回修正后的行，确保重启/切仓后一致。
 
 ## 行为变更（Breaking/Behavior Changes）
-- **[编排器职责收敛]**
-  - `summaryService.ts` 仅负责编排端口与引擎结果；评分与基础分的计算细节下沉至引擎层。
-- **[数据层去业务化]**
-  - `db_sqljs.ts` 不再内联基础分业务规则，改为调用 `baseScoreEngine.ts`，便于参数调优与单元测试。
+- **[基础分不再截断到 0..100]**
+  - 现在按真实基础分入库（四舍五入）。在极端情况下，趋势展示会更贴近实际计算结果。
+- **[切仓刷新策略调整]**
+  - 由“延迟/防抖”改为“立即刷新”。切换仓库后会瞬时清空并重新加载，UI 反馈更确定。
+- **[导入/导出入口位置调整]**
+  - 统一到“仓库”页，设置页不再提供该入口。
 
 ## 受影响文件
-- `electron/services/ports.ts`
-- `electron/services/summaryService.ts`
-- `electron/services/progressEngine.ts`
-- `electron/services/baseScoreEngine.ts`
-- `electron/services/progressCalculator.ts`
-- `electron/services/db_sqljs.ts`
+- `electron/main.ts`
+- `electron/preload.ts`
 - `electron/services/gitAnalyzer.ts`
-- `electron/services/aiSummarizer.ts`
+- `electron/services/db_sqljs.ts`
+- `src/components/Repo.tsx`
+- `src/components/Dashboard.tsx`
+- `src/components/settings/SettingsDatabase.tsx`
 
 ## 今日提交（自 00:00 起）
 > 近期存在未推送的本地变更，此处仅列概要，具体以实际日志为准。
-- refactor(services): 引入 Ports/Adapters，summary 通过端口注入依赖
-- feat(engine): 新增 progressEngine，统一本地进步分流水线
-- feat(engine): 新增 baseScoreEngine，db_sqljs 接入基础分引擎
-- fix(types): 修复 ECDF 严格空检查与端口签名不一致
-- refactor(summary): AI 摘要改为通过 SummarizerPort 调用
-
+- feat(repo): 新增数据库导入/导出入口与 Toast 反馈，IPC 支持备份与事件广播
+- chore(settings): 文案改为“仪表盘刷新间隔”，移除导入/导出按钮
+- fix(git): Windows 启用 core.longpaths；父提交解析改用 rev-parse，避免多行输出
+- fix(db): 修复趋势与基础分不一致；移除基础分 0..100 截断
+- feat(dashboard): 切仓即时清空并重载；今日总结从 DB 直接读取
