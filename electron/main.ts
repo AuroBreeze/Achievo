@@ -68,6 +68,56 @@ ipcMain.handle('db:currentFile', async () => {
   return db.getFilePath();
 });
 
+// Export current repo DB to user-selected path
+ipcMain.handle('db:export', async () => {
+  try {
+    const cfg = await getConfig();
+    const db = new DB({ repoPath: cfg.repoPath });
+    const src = db.getFilePath();
+    // Ensure source exists (create empty DB file if not yet present)
+    try { if (!fs.existsSync(src)) { fs.writeFileSync(src, Buffer.from([])); } } catch {}
+    const res = await dialog.showSaveDialog({
+      title: '导出数据库',
+      defaultPath: src.endsWith('.sqljs') ? src : (src + '.sqljs'),
+      filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    fs.copyFileSync(src, res.filePath);
+    return { ok: true, path: res.filePath };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+// Import DB file (overwrite current repo DB)
+ipcMain.handle('db:import', async () => {
+  try {
+    const res = await dialog.showOpenDialog({
+      title: '导入数据库',
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
+    });
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+    const src = res.filePaths[0];
+    const cfg = await getConfig();
+    const db = new DB({ repoPath: cfg.repoPath });
+    const dst = db.getFilePath();
+    // backup existing
+    try {
+      if (fs.existsSync(dst)) {
+        const bak = dst.replace(/\.sqljs$/i, '') + `.bak.${Date.now()}.sqljs`;
+        fs.copyFileSync(dst, bak);
+      }
+    } catch {}
+    fs.copyFileSync(src, dst);
+    // notify renderer config consumers to reload data
+    if (win) { try { win.webContents.send('db:imported', { path: dst }); } catch {} }
+    return { ok: true, path: dst };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
 // Repo history management
 ipcMain.handle('config:repoHistory:remove', async (_evt, payload: { path: string }) => {
   const cfg = await getConfig();

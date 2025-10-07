@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('api', {
   openLogDir: () => ipcRenderer.invoke('app:openLogDir'),
   openDbDir: () => ipcRenderer.invoke('app:openDbDir'),
   dbCurrentFile: () => ipcRenderer.invoke('db:currentFile'),
+  dbExport: () => ipcRenderer.invoke('db:export'),
+  dbImport: () => ipcRenderer.invoke('db:import'),
 
   // window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
@@ -48,6 +50,10 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_: unknown, payload: { id: string; progress: number; status: string }) => callback(payload);
     ipcRenderer.on('summary:job:progress', listener);
     return () => ipcRenderer.removeListener('summary:job:progress', listener);
+  },
+  onDbImportedOnce: (callback: (payload: { path: string }) => void) => {
+    const listener = (_: unknown, payload: { path: string }) => { callback(payload); ipcRenderer.removeListener('db:imported', listener); };
+    ipcRenderer.on('db:imported', listener);
   },
 
   // repo history management
