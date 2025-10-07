@@ -178,6 +178,7 @@ const Dashboard: React.FC = () => {
   const [jobProgress, setJobProgress] = useState<number>(0);
   const [pollSeconds, setPollSeconds] = useState<number>(10);
   const [currentRepo, setCurrentRepo] = useState<string>('');
+  const currentRepoRef = React.useRef<string>('');
   const repoReloadTimer = React.useRef<number | null>(null);
 
   const loadToday = async () => {
@@ -280,7 +281,7 @@ const Dashboard: React.FC = () => {
           const cfg: any = await window.api.getConfig();
           const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
           setPollSeconds(dps);
-          if (typeof cfg?.repoPath === 'string') setCurrentRepo(cfg.repoPath);
+          if (typeof cfg?.repoPath === 'string') { setCurrentRepo(cfg.repoPath); currentRepoRef.current = cfg.repoPath; }
         }
       } catch {}
       await loadTodayLive();
@@ -297,6 +298,7 @@ const Dashboard: React.FC = () => {
         const rp = e.detail.repoPath;
         if (rp !== currentRepo) {
           setCurrentRepo(rp);
+          currentRepoRef.current = rp;
           // Clear current visuals to avoid cross-repo mixing
           setToday(null);
           setTodayText('');
@@ -314,6 +316,8 @@ const Dashboard: React.FC = () => {
           setAiProvider(null);
           setAiTokens(null);
           setAiDurationMs(null);
+          setTodayBusy(false);
+          setJobProgress(0);
           // Debounced + idle-scheduled reload to avoid thrash on rapid switches
           if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
           repoReloadTimer.current = window.setTimeout(() => {
@@ -351,11 +355,21 @@ const Dashboard: React.FC = () => {
   React.useEffect(() => {
     if (!window.api) return;
     const off = window.api.onSummaryJobProgress(async ({ status, progress }) => {
+      // Guard: ensure event applies to current repo
+      try {
+        const cfg: any = await window.api?.getConfig?.();
+        if (typeof cfg?.repoPath === 'string' && cfg.repoPath !== currentRepoRef.current) return;
+      } catch {}
       setTodayBusy(status === 'running');
       setJobProgress(typeof progress === 'number' ? progress : 0);
       if (status === 'done') {
         try {
           const job: any = await window.api?.getSummaryJobStatus?.();
+          // re-check repo before applying cached result
+          try {
+            const cfg2: any = await window.api?.getConfig?.();
+            if (typeof cfg2?.repoPath === 'string' && cfg2.repoPath !== currentRepoRef.current) return;
+          } catch {}
           const r = job?.result;
           if (r) {
             setTodayText(String(r.summary || ''));
