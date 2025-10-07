@@ -177,6 +177,8 @@ const Dashboard: React.FC = () => {
   const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
   const [jobProgress, setJobProgress] = useState<number>(0);
   const [pollSeconds, setPollSeconds] = useState<number>(10);
+  const [currentRepo, setCurrentRepo] = useState<string>('');
+  const repoReloadTimer = React.useRef<number | null>(null);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -278,6 +280,7 @@ const Dashboard: React.FC = () => {
           const cfg: any = await window.api.getConfig();
           const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
           setPollSeconds(dps);
+          if (typeof cfg?.repoPath === 'string') setCurrentRepo(cfg.repoPath);
         }
       } catch {}
       await loadTodayLive();
@@ -289,6 +292,45 @@ const Dashboard: React.FC = () => {
     const onCfg = (e: any) => {
       const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
       if (dps) setPollSeconds(dps);
+      // If repoPath changed, force reload all series from new repo DB
+      if (typeof e?.detail?.repoPath === 'string') {
+        const rp = e.detail.repoPath;
+        if (rp !== currentRepo) {
+          setCurrentRepo(rp);
+          // Clear current visuals to avoid cross-repo mixing
+          setToday(null);
+          setTodayText('');
+          setTotals(null);
+          setTodayLive(null);
+          setScoreLocal(null);
+          setScoreAi(null);
+          setProgressPercent(null);
+          setFeaturesSummary('');
+          setDaily([]);
+          setTrendDerived(null);
+          setLastGenAt(null);
+          setChunksCount(null);
+          setAiModel(null);
+          setAiProvider(null);
+          setAiTokens(null);
+          setAiDurationMs(null);
+          // Debounced + idle-scheduled reload to avoid thrash on rapid switches
+          if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
+          repoReloadTimer.current = window.setTimeout(() => {
+            // schedule heavy loads when browser is idle
+            const doLoad = async () => {
+              await loadTodayLive();
+              await loadToday();
+              await loadTotals();
+              await loadDailyRange();
+            };
+            const id = (window as any).requestIdleCallback ? (window as any).requestIdleCallback(doLoad) : setTimeout(doLoad, 50);
+            // best-effort cleanup of idle handle when component unmounts
+            try { if (typeof id === 'number') { /* no standard cancel needed here */ } } catch {}
+            repoReloadTimer.current = null;
+          }, 250);
+        }
+      }
     };
     window.addEventListener('config:updated' as any, onCfg as any);
     return () => { window.removeEventListener('config:updated' as any, onCfg as any); };

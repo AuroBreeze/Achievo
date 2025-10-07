@@ -162,6 +162,7 @@ const Settings: React.FC = () => {
         logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
         logToFile,
         logFileName: (logFileName || 'achievo.log').trim(),
+        repoPath,
         localScoring: {
           coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
           windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -188,6 +189,7 @@ const Settings: React.FC = () => {
       if ((window as any).api?.setConfig) {
         await (window as any).api.setConfig({ openaiApiKey: apiKey, repoPath: res.path });
       }
+      try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { repoPath: res.path } })); } catch {}
       await refresh();
     }
   };
@@ -198,6 +200,7 @@ const Settings: React.FC = () => {
       if ((window as any).api?.setConfig) {
         await (window as any).api.setConfig({ openaiApiKey: apiKey, repoPath: p });
       }
+      try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { repoPath: p } })); } catch {}
       await refresh();
     } catch {}
   };
