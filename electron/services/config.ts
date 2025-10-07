@@ -5,6 +5,7 @@ import path from 'node:path';
 export type AppConfig = {
   openaiApiKey?: string;
   repoPath?: string;
+  repoHistory?: string[]; // 最近选择的仓库路径列表（去重，按时间倒序）
   lastProcessedCommit?: string | null;
   lastSummaryDate?: string | null; // YYYY-MM-DD
   aiProvider?: 'openai' | 'deepseek' | 'custom';
@@ -41,6 +42,7 @@ const defaults: AppConfig = {
   lastSummaryDate: null,
   aiProvider: 'openai',
   aiModel: 'gpt-4o-mini',
+  repoHistory: [],
   dbPollSeconds: 10,
   dailyCapRatio: 0.35,
   logLevel: 'info',
@@ -77,6 +79,18 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function setConfig(cfg: AppConfig): Promise<void> {
-  const merged = { ...(await getConfig()), ...cfg };
+  const prev = await getConfig();
+  const merged: AppConfig = { ...prev, ...cfg };
+  // Maintain repo history when setting repoPath
+  if (cfg && typeof cfg.repoPath === 'string' && cfg.repoPath.trim()) {
+    const rp = cfg.repoPath.trim();
+    const list = Array.isArray(prev.repoHistory) ? [...prev.repoHistory] : [];
+    // remove existing
+    const filtered = list.filter(p => String(p||'').trim().toLowerCase() !== rp.toLowerCase());
+    // unshift new
+    filtered.unshift(rp);
+    // cap length
+    merged.repoHistory = filtered.slice(0, 10);
+  }
   await fs.writeFile(configPath(), JSON.stringify(merged, null, 2), 'utf-8');
 }

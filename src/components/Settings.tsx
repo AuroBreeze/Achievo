@@ -15,6 +15,7 @@ const Settings: React.FC = () => {
   const [aiBaseUrl, setAiBaseUrl] = useState('');
   const [aiApiKey, setAiApiKey] = useState('');
   const [repoPath, setRepoPath] = useState('');
+  const [repoHistory, setRepoHistory] = useState<string[]>([]);
   const [intervalMs, setIntervalMs] = useState<number>(30000);
   const [quoteFontSize, setQuoteFontSize] = useState<number>(11);
   const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
@@ -51,6 +52,7 @@ const Settings: React.FC = () => {
     const cfg = await window.api.getConfig();
     setApiKey(cfg.openaiApiKey ?? '');
     setRepoPath(cfg.repoPath ?? '');
+    setRepoHistory(Array.isArray((cfg as any).repoHistory) ? ((cfg as any).repoHistory as string[]) : []);
     setAiProvider((cfg.aiProvider as any) ?? 'openai');
     setAiModel(cfg.aiModel ?? (cfg.aiProvider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'));
     setAiBaseUrl(cfg.aiBaseUrl ?? '');
@@ -178,6 +180,14 @@ const Settings: React.FC = () => {
       await window.api.setConfig({ openaiApiKey: apiKey, repoPath: res.path });
       await refresh();
     }
+  };
+
+  const selectFromHistory = async (p: string) => {
+    setRepoPath(p);
+    try {
+      await window.api.setConfig({ openaiApiKey: apiKey, repoPath: p });
+      await refresh();
+    } catch {}
   };
 
   // 设置页面仅用于配置与保存
@@ -533,6 +543,21 @@ const Settings: React.FC = () => {
             className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
           >选择文件夹</button>
         </div>
+        {repoHistory && repoHistory.length > 0 && (
+          <div className="mt-3">
+            <div className="text-xs text-slate-400 mb-2">历史选择</div>
+            <div className="flex flex-wrap gap-2">
+              {repoHistory.map((p, idx) => (
+                <button
+                  key={p+idx}
+                  onClick={()=>selectFromHistory(p)}
+                  className="text-xs px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200 transition-colors max-w-full truncate"
+                  title={p}
+                >{p}</button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Card: 操作 */}

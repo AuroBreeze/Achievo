@@ -17,10 +17,8 @@ import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-// Create a single DB instance and inject into all services to avoid clobbering the sql.js file
-const dbInstance = new DB();
-const tracker = new TrackerService(dbInstance);
-const stats = new StatsService(dbInstance);
+// Tracker manages its own per-repo DB binding internally
+const tracker = new TrackerService();
 
 // Local DB instance defined above
 
@@ -66,7 +64,8 @@ ipcMain.handle('app:openDbDir', async () => {
 // IPC: background job controls
 ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {
-    const res = await generateTodaySummary({ onProgress: onChunk }, { db: dbInstance });
+    // Let summary service bind DB by current repoPath via ports
+    const res = await generateTodaySummary({ onProgress: onChunk });
     return {
       date: res.date,
       summary: res.summary,
@@ -234,7 +233,10 @@ ipcMain.handle('stats:getToday', async () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
-  const row = await dbInstance.getDay(today);
+  // Bind DB to current repo for this call
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const row = await db.getDay(today);
   if (row) return row;
   return {
     date: today,
@@ -258,10 +260,16 @@ ipcMain.handle('stats:getToday', async () => {
 });
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
-  return dbInstance.getDaysRange(payload.startDate, payload.endDate);
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getDaysRange(payload.startDate, payload.endDate);
 });
 
 ipcMain.handle('summary:generate', async () => {
+  // Create a stats service bound to current repo DB
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.generateOnDemandSummary();
 });
 
@@ -273,7 +281,7 @@ ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string
 
 // Summarize today's concrete code changes via unified diff
 ipcMain.handle('summary:todayDiff', async () => {
-  const res = await generateTodaySummary(undefined, { db: dbInstance });
+  const res = await generateTodaySummary();
   return {
     date: res.date,
     summary: res.summary,
@@ -292,21 +300,29 @@ ipcMain.handle('summary:todayDiff', async () => {
 
 // Return today's unified diff text for in-app visualization
 ipcMain.handle('diff:today', async () => {
-  return buildTodayUnifiedDiff({ db: dbInstance });
+  return buildTodayUnifiedDiff();
 });
 
 // Totals across all days
 ipcMain.handle('stats:getTotals', async () => {
-  return dbInstance.getTotals();
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getTotals();
 });
 
 // Live Git-based today's insertions/deletions (includes working tree)
 ipcMain.handle('stats:getTodayLive', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.getTodayLive();
 });
 
 // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
 ipcMain.handle('stats:getTotalsLive', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.getTotalsLive();
 });
 

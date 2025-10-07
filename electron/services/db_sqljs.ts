@@ -42,12 +42,24 @@ export class DB {
   private ready: Promise<void>;
   private logger = getLogger('db');
 
-  constructor() {
+  constructor(opts?: { repoPath?: string; name?: string }) {
     // Resolve install root: exe directory in packaged app; project cwd in dev
     const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
     const dbDir = path.join(installRoot, 'db');
     try { if (!fsSync.existsSync(dbDir)) fsSync.mkdirSync(dbDir, { recursive: true }); } catch {}
-    this.filePath = path.join(dbDir, 'achievo.sqljs');
+    // Derive db file name: default achievo.sqljs; if repoPath provided, use a hashed/sanitized variant
+    const fileName = (() => {
+      // explicit name wins
+      if (opts?.name && opts.name.trim()) return `${sanitizeFile(opts.name.trim())}.sqljs`;
+      const repo = opts?.repoPath;
+      if (repo && repo.trim()) {
+        const base = sanitizeFile(repo.trim());
+        const hash = simpleHash(repo.trim());
+        return `achievo_${base.slice(-24)}_${hash}.sqljs`;
+      }
+      return 'achievo.sqljs';
+    })();
+    this.filePath = path.join(dbDir, fileName);
     this.ready = this.init();
   }
 
@@ -479,4 +491,18 @@ function getIsoWeekRange(date: string): { start: string; end: string } {
   sunday.setUTCDate(monday.getUTCDate() + 6);
   const toKey = (x: Date) => new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate())).toISOString().slice(0, 10);
   return { start: toKey(monday), end: toKey(sunday) };
+}
+
+// Helpers for per-repo DB filename derivation
+function simpleHash(s: string): string {
+  let h = 2166136261 >>> 0; // FNV-1a base
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function sanitizeFile(s: string): string {
+  return s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(-64) || 'db';
 }
