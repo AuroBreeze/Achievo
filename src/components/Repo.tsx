@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { showToast } from '@/components/ui/Toast';
 
 type TrackerStatus = {
   running: boolean;
@@ -149,8 +150,10 @@ const Repo: React.FC = () => {
         </div>
         {repoPath && (
           <div className="mt-2 flex flex-wrap gap-2">
-            <button onClick={()=>{ try { navigator.clipboard?.writeText(repoPath); } catch{} }} className="text-[11px] px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200">复制路径</button>
+            <button onClick={()=>{ try { navigator.clipboard?.writeText(repoPath); showToast('已复制仓库路径','success'); } catch{} }} className="text-[11px] px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200">复制路径</button>
             <button onClick={async()=>{ try { await (window as any).api?.openDbDir?.(); } catch{} }} className="text-[11px] px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200">打开数据库目录</button>
+            <button onClick={async()=>{ try { const r = await (window as any).api?.dbExport?.(); if (r?.ok) { showToast(`已导出到：${r.path}`,'success'); } else if(!r?.canceled) { showToast(`导出失败：${r?.error||'未知错误'}`,'error',3200); } } catch(e:any){ showToast(`导出失败：${e?.message||String(e)}`,'error',3200); } }} className="text-[11px] px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200">导出数据库</button>
+            <button onClick={async()=>{ try { (window as any).api?.onDbImportedOnce?.(()=>{ showToast('导入完成','success'); try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { forceReload: true } })); } catch {} }); const r = await (window as any).api?.dbImport?.(); if (!r?.ok && !r?.canceled) { showToast(`导入失败：${r?.error||'未知错误'}`,'error',3200); } } catch(e:any){ showToast(`导入失败：${e?.message||String(e)}`,'error',3200);} }} className="text-[11px] px-2 py-1 rounded border border-slate-600 bg-slate-800/60 hover:bg-slate-700 text-slate-200">导入数据库</button>
           </div>
         )}
         {status?.lastError && (

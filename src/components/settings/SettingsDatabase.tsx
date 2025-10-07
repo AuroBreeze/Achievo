@@ -24,35 +24,6 @@ const SettingsDatabase: React.FC = () => {
   useEffect(() => { refresh(); }, []);
   useEffect(() => { setDirty(true); }, [dbPollSeconds, dailyCapRatioPct]);
 
-  const onExport = async () => {
-    try {
-      const res = await (window as any).api?.dbExport?.();
-      if (res?.ok) {
-        showToast(`已导出到：${res.path}`, 'success');
-      } else if (!res?.canceled) {
-        showToast(`导出失败：${res?.error || '未知错误'}`, 'error', 3200);
-      }
-    } catch (e:any) {
-      showToast(`导出失败：${e?.message || String(e)}`, 'error', 3200);
-    }
-  };
-
-  const onImport = async () => {
-    try {
-      (window as any).api?.onDbImportedOnce?.(() => {
-        refresh();
-        showToast('导入完成，已刷新设置', 'success');
-        try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { forceReload: true } })); } catch {}
-      });
-      const res = await (window as any).api?.dbImport?.();
-      if (!res?.ok && !res?.canceled) {
-        showToast(`导入失败：${res?.error || '未知错误'}`, 'error', 3200);
-      }
-    } catch (e:any) {
-      showToast(`导入失败：${e?.message || String(e)}`, 'error', 3200);
-    }
-  };
-
   const save = async () => {
     setSaved('');
     try {
@@ -103,11 +74,7 @@ const SettingsDatabase: React.FC = () => {
         </div>
       </div>
       <div className="mt-3">
-        <div className="flex flex-wrap gap-2">
-          <button onClick={save} disabled={!dirty} className={`px-4 py-2 rounded-md text-white shadow border transition-colors ${dirty ? 'bg-indigo-600 hover:bg-indigo-500 border-indigo-500/60' : 'bg-slate-700 border-slate-600 opacity-70 cursor-not-allowed'}`}>保存</button>
-          <button onClick={onExport} className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors">导出数据库</button>
-          <button onClick={onImport} className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors">导入数据库</button>
-        </div>
+        <button onClick={save} disabled={!dirty} className={`px-4 py-2 rounded-md text-white shadow border transition-colors ${dirty ? 'bg-indigo-600 hover:bg-indigo-500 border-indigo-500/60' : 'bg-slate-700 border-slate-600 opacity-70 cursor-not-allowed'}`}>保存</button>
       </div>
     </section>
   );
