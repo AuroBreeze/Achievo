@@ -17,10 +17,8 @@ import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-// Create a single DB instance and inject into all services to avoid clobbering the sql.js file
-const dbInstance = new DB();
-const tracker = new TrackerService(dbInstance);
-const stats = new StatsService(dbInstance);
+// Tracker manages its own per-repo DB binding internally
+const tracker = new TrackerService();
 
 // Local DB instance defined above
 
@@ -63,10 +61,96 @@ ipcMain.handle('app:openDbDir', async () => {
   try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'db'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
 
+// DB helper: return current DB file path for active repo
+ipcMain.handle('db:currentFile', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getFilePath();
+});
+
+// Export current repo DB to user-selected path
+ipcMain.handle('db:export', async () => {
+  try {
+    const cfg = await getConfig();
+    const db = new DB({ repoPath: cfg.repoPath });
+    const src = db.getFilePath();
+    // Ensure source exists (create empty DB file if not yet present)
+    try { if (!fs.existsSync(src)) { fs.writeFileSync(src, Buffer.from([])); } } catch {}
+    const res = await dialog.showSaveDialog({
+      title: '导出数据库',
+      defaultPath: src.endsWith('.sqljs') ? src : (src + '.sqljs'),
+      filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    fs.copyFileSync(src, res.filePath);
+    return { ok: true, path: res.filePath };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+// Import DB file (overwrite current repo DB)
+ipcMain.handle('db:import', async () => {
+  try {
+    const res = await dialog.showOpenDialog({
+      title: '导入数据库',
+      properties: ['openFile'],
+      filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
+    });
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+    const src = res.filePaths[0];
+    const cfg = await getConfig();
+    const db = new DB({ repoPath: cfg.repoPath });
+    const dst = db.getFilePath();
+    // backup existing
+    try {
+      if (fs.existsSync(dst)) {
+        const bak = dst.replace(/\.sqljs$/i, '') + `.bak.${Date.now()}.sqljs`;
+        fs.copyFileSync(dst, bak);
+      }
+    } catch {}
+    fs.copyFileSync(src, dst);
+    // notify renderer config consumers to reload data
+    if (win) { try { win.webContents.send('db:imported', { path: dst }); } catch {} }
+    return { ok: true, path: dst };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+// Repo history management
+ipcMain.handle('config:repoHistory:remove', async (_evt, payload: { path: string }) => {
+  const cfg = await getConfig();
+  const target = String(payload?.path || '').trim().toLowerCase();
+  const list = Array.isArray((cfg as any).repoHistory) ? ((cfg as any).repoHistory as string[]) : [];
+  const next = list.filter(p => String(p||'').trim().toLowerCase() !== target);
+  await setConfig({ ...cfg, repoHistory: next } as any);
+  return next;
+});
+
+ipcMain.handle('config:repoHistory:clear', async () => {
+  const cfg = await getConfig();
+  await setConfig({ ...cfg, repoHistory: [] } as any);
+  return [] as string[];
+});
+
+ipcMain.handle('config:repoHistory:top', async (_evt, payload: { path: string }) => {
+  const cfg = await getConfig();
+  const p = String(payload?.path || '').trim();
+  if (!p) return (cfg.repoHistory || []);
+  const list = Array.isArray(cfg.repoHistory) ? [...cfg.repoHistory] : [];
+  const filtered = list.filter(x => String(x||'').trim().toLowerCase() !== p.toLowerCase());
+  filtered.unshift(p);
+  const next = filtered.slice(0, 10);
+  await setConfig({ ...cfg, repoHistory: next } as any);
+  return next;
+});
+
 // IPC: background job controls
 ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {
-    const res = await generateTodaySummary({ onProgress: onChunk }, { db: dbInstance });
+    // Let summary service bind DB by current repoPath via ports
+    const res = await generateTodaySummary({ onProgress: onChunk });
     return {
       date: res.date,
       summary: res.summary,
@@ -234,8 +318,26 @@ ipcMain.handle('stats:getToday', async () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
-  const row = await dbInstance.getDay(today);
-  if (row) return row;
+  // Bind DB to current repo for this call
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  let row = await db.getDay(today);
+  if (row) {
+    // Ensure trend is consistent with baseScore and yesterday base after repo switch or restart
+    try {
+      const y = new Date(d);
+      y.setDate(d.getDate() - 1);
+      const yKey = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+      const yRow: any = await db.getDay(yKey);
+      const prevBase = Math.max(100, yRow?.baseScore || 100);
+      const shouldTrend = Math.round((row as any).baseScore - prevBase);
+      if ((row as any).trend !== shouldTrend) {
+        await db.setDayBaseScore(today, (row as any).baseScore);
+        row = await db.getDay(today);
+      }
+    } catch {}
+    return row;
+  }
   return {
     date: today,
     insertions: 0,
@@ -258,10 +360,16 @@ ipcMain.handle('stats:getToday', async () => {
 });
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
-  return dbInstance.getDaysRange(payload.startDate, payload.endDate);
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getDaysRange(payload.startDate, payload.endDate);
 });
 
 ipcMain.handle('summary:generate', async () => {
+  // Create a stats service bound to current repo DB
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.generateOnDemandSummary();
 });
 
@@ -273,7 +381,7 @@ ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string
 
 // Summarize today's concrete code changes via unified diff
 ipcMain.handle('summary:todayDiff', async () => {
-  const res = await generateTodaySummary(undefined, { db: dbInstance });
+  const res = await generateTodaySummary();
   return {
     date: res.date,
     summary: res.summary,
@@ -292,21 +400,29 @@ ipcMain.handle('summary:todayDiff', async () => {
 
 // Return today's unified diff text for in-app visualization
 ipcMain.handle('diff:today', async () => {
-  return buildTodayUnifiedDiff({ db: dbInstance });
+  return buildTodayUnifiedDiff();
 });
 
 // Totals across all days
 ipcMain.handle('stats:getTotals', async () => {
-  return dbInstance.getTotals();
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getTotals();
 });
 
 // Live Git-based today's insertions/deletions (includes working tree)
 ipcMain.handle('stats:getTodayLive', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.getTodayLive();
 });
 
 // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
 ipcMain.handle('stats:getTotalsLive', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const stats = new StatsService(db);
   return stats.getTotalsLive();
 });
 

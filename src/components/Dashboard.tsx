@@ -177,11 +177,16 @@ const Dashboard: React.FC = () => {
   const [aiDurationMs, setAiDurationMs] = useState<number | null>(null);
   const [jobProgress, setJobProgress] = useState<number>(0);
   const [pollSeconds, setPollSeconds] = useState<number>(10);
+  const [currentRepo, setCurrentRepo] = useState<string>('');
+  const currentRepoRef = React.useRef<string>('');
+  const repoReloadTimer = React.useRef<number | null>(null);
 
   const loadToday = async () => {
     if (!window.api) return;
     const t = await window.api.statsGetToday();
     setToday(t);
+    // set summary text from DB to avoid stale value when switching repos
+    setTodayText(String(t?.summary || ''));
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
@@ -278,6 +283,7 @@ const Dashboard: React.FC = () => {
           const cfg: any = await window.api.getConfig();
           const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
           setPollSeconds(dps);
+          if (typeof cfg?.repoPath === 'string') { setCurrentRepo(cfg.repoPath); currentRepoRef.current = cfg.repoPath; }
         }
       } catch {}
       await loadTodayLive();
@@ -289,6 +295,41 @@ const Dashboard: React.FC = () => {
     const onCfg = (e: any) => {
       const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
       if (dps) setPollSeconds(dps);
+      // If repoPath changed, force reload all series from new repo DB
+      if (typeof e?.detail?.repoPath === 'string') {
+        const rp = e.detail.repoPath;
+        if (rp !== currentRepoRef.current) {
+          setCurrentRepo(rp);
+          currentRepoRef.current = rp;
+          // Clear current visuals to avoid cross-repo mixing
+          setToday(null);
+          setTodayText('');
+          setTotals(null);
+          setTodayLive(null);
+          setScoreLocal(null);
+          setScoreAi(null);
+          setProgressPercent(null);
+          setFeaturesSummary('');
+          setDaily([]);
+          setTrendDerived(null);
+          setLastGenAt(null);
+          setChunksCount(null);
+          setAiModel(null);
+          setAiProvider(null);
+          setAiTokens(null);
+          setAiDurationMs(null);
+          setTodayBusy(false);
+          setJobProgress(0);
+          // Immediate reload for the selected repo to avoid stale display
+          if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
+          (async () => {
+            await loadTodayLive();
+            await loadToday();
+            await loadTotals();
+            await loadDailyRange();
+          })();
+        }
+      }
     };
     window.addEventListener('config:updated' as any, onCfg as any);
     return () => { window.removeEventListener('config:updated' as any, onCfg as any); };
@@ -309,11 +350,21 @@ const Dashboard: React.FC = () => {
   React.useEffect(() => {
     if (!window.api) return;
     const off = window.api.onSummaryJobProgress(async ({ status, progress }) => {
+      // Guard: ensure event applies to current repo
+      try {
+        const cfg: any = await window.api?.getConfig?.();
+        if (typeof cfg?.repoPath === 'string' && cfg.repoPath !== currentRepoRef.current) return;
+      } catch {}
       setTodayBusy(status === 'running');
       setJobProgress(typeof progress === 'number' ? progress : 0);
       if (status === 'done') {
         try {
           const job: any = await window.api?.getSummaryJobStatus?.();
+          // re-check repo before applying cached result
+          try {
+            const cfg2: any = await window.api?.getConfig?.();
+            if (typeof cfg2?.repoPath === 'string' && cfg2.repoPath !== currentRepoRef.current) return;
+          } catch {}
           const r = job?.result;
           if (r) {
             setTodayText(String(r.summary || ''));

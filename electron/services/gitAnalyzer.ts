@@ -9,12 +9,24 @@ export type GitDiffNumstat = {
 export class GitAnalyzer {
   private git: SimpleGit;
   private logger = getLogger('git');
+  private longPathsEnsured = false;
   constructor(private repoPath: string) {
     this.git = simpleGit(repoPath);
   }
 
+  private async ensureLongPathsOnce() {
+    if (this.longPathsEnsured) return;
+    if (process.platform === 'win32') {
+      try {
+        await this.git.raw(['config', 'core.longpaths', 'true']);
+      } catch {}
+    }
+    this.longPathsEnsured = true;
+  }
+
   // Get aggregated insertions/deletions since local date (YYYY-MM-DD), including working tree changes
   async getNumstatSinceDate(date: string): Promise<GitDiffNumstat> {
+    await this.ensureLongPathsOnce();
     const before = `${date}T00:00:00`;
     if (this.logger.enabled.debug) this.logger.debug('getNumstatSinceDate:start', { date, before });
     let base = (await this.git.raw(['rev-list', '--max-count=1', `--before=${before}`, 'HEAD'])).trim();
@@ -55,6 +67,7 @@ export class GitAnalyzer {
   }
 
   async getHeadCommit(): Promise<string> {
+    await this.ensureLongPathsOnce();
     const log = await this.git.log({ n: 1 });
     const hash = log.latest?.hash || '';
     if (this.logger.enabled.debug) this.logger.debug('getHeadCommit', { hash });
@@ -63,11 +76,13 @@ export class GitAnalyzer {
 
   // Get aggregated insertions/deletions between two commits (exclusive of from, inclusive of to)
   async getDiffNumstat(fromCommit: string | null, toCommit: string): Promise<GitDiffNumstat> {
+    await this.ensureLongPathsOnce();
     // If fromCommit is null, compare with first parent of toCommit
     let base = fromCommit;
     if (!base) {
-      const parents = await this.git.raw(['rev-list', '--max-parents=1', toCommit]);
-      base = parents.trim();
+      // Get immediate parent of toCommit; if root (no parent), return zero
+      const parent = (await this.git.raw(['rev-parse', `${toCommit}^`])).trim();
+      base = parent.split(/\s+/)[0] || '';
       if (!base) return { insertions: 0, deletions: 0 };
     }
     if (this.logger.enabled.debug) this.logger.debug('getDiffNumstat', { base, toCommit });
@@ -92,6 +107,7 @@ export class GitAnalyzer {
 
   // Working tree changes (not committed)
   async getWorkingTreeNumstat(): Promise<GitDiffNumstat> {
+    await this.ensureLongPathsOnce();
     const out = await this.git.raw(['diff', '--numstat']);
     let insertions = 0, deletions = 0;
     for (const line of out.split('\n')) {
@@ -111,6 +127,7 @@ export class GitAnalyzer {
   // Get unified diff text since the last commit before the given local-date (YYYY-MM-DD)
   // This compares base commit vs current working tree so uncommitted changes are included.
   async getUnifiedDiffSinceDate(date: string): Promise<string> {
+    await this.ensureLongPathsOnce();
     // Use ISO-like format to avoid locale parsing issues on different platforms
     const before = `${date}T00:00:00`;
     if (this.logger.enabled.debug) this.logger.debug('getUnifiedDiffSinceDate:start', { date, before });

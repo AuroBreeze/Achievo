@@ -29,6 +29,8 @@ export class TrackerService {
 
     this.repoPath = cfg.repoPath;
     if (!this.repoPath) throw new Error('未设置仓库路径');
+    // Rebind DB to this repo
+    this.db = new DB({ repoPath: this.repoPath });
 
     // load last processed commit from config if any
     this.lastProcessedCommit = cfg.lastProcessedCommit ?? null;
@@ -96,6 +98,8 @@ export class TrackerService {
 
     this.repoPath = cfg.repoPath;
     if (!this.repoPath) throw new Error('未设置仓库路径');
+    // Rebind DB to this repo for one-shot
+    this.db = new DB({ repoPath: this.repoPath });
     if (this.logger.enabled.info) this.logger.info('analyzeOnce', { repoPath: this.repoPath });
     await this.tick();
     return this.status();

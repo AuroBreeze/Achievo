@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import Dashboard from '@/components/Dashboard';
-import Settings from '@/components/Settings';
+import Settings from '@/components/settings/SettingsIndex';
+import Repo from '@/components/Repo';
 import TitleBar from '@/components/TitleBar';
+import ToastContainer from '@/components/ui/Toast';
 
 function App() {
-  const [tab, setTab] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
+  const [tab, setTab] = useState<'dashboard' | 'repo' | 'history' | 'settings'>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarPinned, setSidebarPinned] = useState(false);
   // collapsed quote state
@@ -145,11 +147,17 @@ function App() {
     return () => { if (timer) clearInterval(timer); };
   }, [quoteEnabled, sidebarOpen, quoteRefreshSeconds]);
 
-  const Icon = ({ name }: { name: 'dashboard'|'history'|'settings' }) => {
+  const Icon = ({ name }: { name: 'dashboard'|'repo'|'history'|'settings' }) => {
     const common = 'w-4 h-4';
     if (name === 'dashboard') return (
       <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z"/>
+      </svg>
+    );
+    if (name === 'repo') return (
+      <svg className={common} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M4 4h12v16H4z"/>
+        <path d="M8 8h4M8 12h6M8 16h6"/>
       </svg>
     );
     if (name === 'history') return (
@@ -166,7 +174,7 @@ function App() {
     );
   };
 
-  const navItem = (key: 'dashboard'|'history'|'settings', label: string) => {
+  const navItem = (key: 'dashboard'|'repo'|'history'|'settings', label: string) => {
     const active = tab === key;
     return (
       <button
@@ -186,6 +194,7 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <TitleBar />
+      <ToastContainer />
       {/* Sidebar + Content */}
       <div className="relative flex">
         {/* Hover zone to open sidebar when collapsed */}
@@ -228,6 +237,9 @@ function App() {
               <div className="flex-1 space-y-1">
                 <div className="group relative">
                   {navItem('dashboard', '仪表盘')}
+                </div>
+                <div className="group relative">
+                  {navItem('repo', '仓库')}
                 </div>
                 <div className="group relative">
                   {navItem('history', '历史')}
@@ -275,6 +287,7 @@ function App() {
         {/* Main */}
         <main className={`pt-4 pr-4 pb-4 pl-20 w-full`}>
           {tab === 'dashboard' && <Dashboard />}
+          {tab === 'repo' && <Repo />}
           {tab === 'history' && (
             <div className="bg-slate-800 rounded p-4 border border-slate-700">
               <div className="text-slate-300">历史图表已移动到仪表盘中。</div>

@@ -75,8 +75,8 @@ export async function makeDefaultPorts(deps?: { db?: DB | DBPort; repoPath?: str
   if (deps?.db) {
     dbPort = deps.db instanceof DB ? new SqljsDbAdapter(deps.db) : (deps.db as DBPort);
   } else {
-    // Fallback to a new instance if not injected
-    dbPort = new SqljsDbAdapter(new DB());
+    // Fallback to a new instance bound to current repo if not injected
+    dbPort = new SqljsDbAdapter(new DB({ repoPath: repo }));
   }
   return {
     db: dbPort,
