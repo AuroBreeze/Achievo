@@ -61,6 +61,41 @@ ipcMain.handle('app:openDbDir', async () => {
   try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'db'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
 });
 
+// DB helper: return current DB file path for active repo
+ipcMain.handle('db:currentFile', async () => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getFilePath();
+});
+
+// Repo history management
+ipcMain.handle('config:repoHistory:remove', async (_evt, payload: { path: string }) => {
+  const cfg = await getConfig();
+  const target = String(payload?.path || '').trim().toLowerCase();
+  const list = Array.isArray((cfg as any).repoHistory) ? ((cfg as any).repoHistory as string[]) : [];
+  const next = list.filter(p => String(p||'').trim().toLowerCase() !== target);
+  await setConfig({ ...cfg, repoHistory: next } as any);
+  return next;
+});
+
+ipcMain.handle('config:repoHistory:clear', async () => {
+  const cfg = await getConfig();
+  await setConfig({ ...cfg, repoHistory: [] } as any);
+  return [] as string[];
+});
+
+ipcMain.handle('config:repoHistory:top', async (_evt, payload: { path: string }) => {
+  const cfg = await getConfig();
+  const p = String(payload?.path || '').trim();
+  if (!p) return (cfg.repoHistory || []);
+  const list = Array.isArray(cfg.repoHistory) ? [...cfg.repoHistory] : [];
+  const filtered = list.filter(x => String(x||'').trim().toLowerCase() !== p.toLowerCase());
+  filtered.unshift(p);
+  const next = filtered.slice(0, 10);
+  await setConfig({ ...cfg, repoHistory: next } as any);
+  return next;
+});
+
 // IPC: background job controls
 ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {

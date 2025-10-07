@@ -63,6 +63,10 @@ export class DB {
     this.ready = this.init();
   }
 
+  getFilePath(): string {
+    return this.filePath;
+  }
+
   async setDayAiMeta(date: string, meta: { aiModel?: string | null; aiProvider?: string | null; aiTokens?: number | null; aiDurationMs?: number | null; chunksCount?: number | null; lastGenAt?: number | null }) {
     await this.ready;
     const now = Date.now();
