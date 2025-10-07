@@ -321,8 +321,23 @@ ipcMain.handle('stats:getToday', async () => {
   // Bind DB to current repo for this call
   const cfg = await getConfig();
   const db = new DB({ repoPath: cfg.repoPath });
-  const row = await db.getDay(today);
-  if (row) return row;
+  let row = await db.getDay(today);
+  if (row) {
+    // Ensure trend is consistent with baseScore and yesterday base after repo switch or restart
+    try {
+      const y = new Date(d);
+      y.setDate(d.getDate() - 1);
+      const yKey = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+      const yRow: any = await db.getDay(yKey);
+      const prevBase = Math.max(100, yRow?.baseScore || 100);
+      const shouldTrend = Math.round((row as any).baseScore - prevBase);
+      if ((row as any).trend !== shouldTrend) {
+        await db.setDayBaseScore(today, (row as any).baseScore);
+        row = await db.getDay(today);
+      }
+    } catch {}
+    return row;
+  }
   return {
     date: today,
     insertions: 0,

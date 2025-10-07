@@ -185,6 +185,8 @@ const Dashboard: React.FC = () => {
     if (!window.api) return;
     const t = await window.api.statsGetToday();
     setToday(t);
+    // set summary text from DB to avoid stale value when switching repos
+    setTodayText(String(t?.summary || ''));
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
@@ -296,7 +298,7 @@ const Dashboard: React.FC = () => {
       // If repoPath changed, force reload all series from new repo DB
       if (typeof e?.detail?.repoPath === 'string') {
         const rp = e.detail.repoPath;
-        if (rp !== currentRepo) {
+        if (rp !== currentRepoRef.current) {
           setCurrentRepo(rp);
           currentRepoRef.current = rp;
           // Clear current visuals to avoid cross-repo mixing
@@ -318,21 +320,14 @@ const Dashboard: React.FC = () => {
           setAiDurationMs(null);
           setTodayBusy(false);
           setJobProgress(0);
-          // Debounced + idle-scheduled reload to avoid thrash on rapid switches
+          // Immediate reload for the selected repo to avoid stale display
           if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
-          repoReloadTimer.current = window.setTimeout(() => {
-            // schedule heavy loads when browser is idle
-            const doLoad = async () => {
-              await loadTodayLive();
-              await loadToday();
-              await loadTotals();
-              await loadDailyRange();
-            };
-            const id = (window as any).requestIdleCallback ? (window as any).requestIdleCallback(doLoad) : setTimeout(doLoad, 50);
-            // best-effort cleanup of idle handle when component unmounts
-            try { if (typeof id === 'number') { /* no standard cancel needed here */ } } catch {}
-            repoReloadTimer.current = null;
-          }, 250);
+          (async () => {
+            await loadTodayLive();
+            await loadToday();
+            await loadTotals();
+            await loadDailyRange();
+          })();
         }
       }
     };

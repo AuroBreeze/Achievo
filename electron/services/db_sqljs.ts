@@ -124,7 +124,8 @@ export class DB {
       // Summary becomes authoritative for today's base/trend.
       if (typeof exists.lastGenAt === 'number') {
         const keepBase = Math.max(100, exists.baseScore || 0);
-        const trend = yesterday ? Math.round(keepBase - yesterday.baseScore) : 0;
+        const prevBase = Math.max(100, yesterday?.baseScore || 100);
+        const trend = Math.round(keepBase - prevBase);
         const hasChanges = (ins + del) > 0;
         const progressPercent = calcProgressPercentComplex({
           trend,
@@ -397,9 +398,10 @@ export class DB {
     const now = Date.now();
     const y = this.getYesterday(date);
     const yesterday = y ? await this.getDay(y) : null;
-    const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
+    const prevBase = Math.max(100, yesterday?.baseScore || 100);
+    const trend = Math.round(baseScore - prevBase);
     this.db.run(`UPDATE days SET baseScore=?, trend=?, updatedAt=? WHERE date=?`, [
-      Math.max(0, Math.min(100, Math.round(baseScore))), trend, now, date
+      Math.round(baseScore), trend, now, date
     ]);
     await this.persist();
   }
