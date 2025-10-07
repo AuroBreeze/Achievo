@@ -5,7 +5,8 @@ import { Storage } from './storage';
 import { todayKey } from './dateUtil';
 import { calcProgressPercentComplex } from './progressCalculator';
 import { computeLocalProgress } from './progressEngine';
-import { makeDefaultPorts } from './ports';
+import { makeDefaultPorts, type Ports } from './ports';
+import { getLogger } from './logger';
 
 export type SummaryResult = {
   date: string;
@@ -23,16 +24,18 @@ export type SummaryResult = {
 };
 
 const storage = new Storage();
+const logger = getLogger('summary');
 
-export async function buildTodayUnifiedDiff(): Promise<{ date: string; diff: string }> {
-  const { git } = await makeDefaultPorts();
+export async function buildTodayUnifiedDiff(deps?: Parameters<typeof makeDefaultPorts>[0]): Promise<{ date: string; diff: string }> {
+  const { git } = await makeDefaultPorts(deps);
   const today = todayKey();
   const diff = await git.getUnifiedDiffSinceDate(today);
+  if (logger.enabled.debug) logger.debug('buildTodayUnifiedDiff', { today, diffLen: diff.length });
   return { date: today, diff };
 }
 
-export async function generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }): Promise<SummaryResult> {
-  const { db: pdb, git, cfg, summarizer } = await makeDefaultPorts();
+export async function generateTodaySummary(opts?: { onProgress?: (done: number, total: number) => void }, deps?: Parameters<typeof makeDefaultPorts>[0]): Promise<SummaryResult> {
+  const { db: pdb, git, cfg, summarizer } = await makeDefaultPorts(deps);
   const today = todayKey();
   // Local scoring parameters
   const ls = (cfg as any).localScoring || {};
@@ -52,7 +55,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   const diff = await git.getUnifiedDiffSinceDate(today);
   const feats = extractDiffFeatures(diff);
   const localScoreRaw = scoreFromFeatures(feats);
-  try { if (process.env.ACHIEVO_DEBUG === 'score') console.debug('[Score] raw', { today, localScoreRaw, feats }); } catch {}
+  if (logger.enabled.debug) logger.debug('features & raw score', { today, localScoreRaw, featsSummary: { codeFiles: feats.codeFiles, testFiles: feats.testFiles, docFiles: feats.docFiles, configFiles: feats.configFiles, hunks: feats.hunks } });
   // Build history window for ECDF (last 30 days, excluding today)
   const startDate = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - Math.max(7, LS_WIN_D)); return d.toISOString().slice(0,10); })();
   const historyRows = await pdb.getDaysRange(startDate, today);
@@ -97,7 +100,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
     prevLocalRaw,
   });
   let localScore = engineOut.localScore;
-  try { if (process.env.ACHIEVO_DEBUG === 'score') console.debug('[Score] engine', engineOut.debug); } catch {}
+  if (logger.enabled.debug) logger.debug('local progress engine', engineOut.debug);
 
   // Numstat for counts & context
   const ns = await git.getNumstatSinceDate(today);
@@ -146,6 +149,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
       hasChanges,
       cap: 25,
     });
+    if (logger.enabled.debug) logger.debug('progress percent', { today, trend, prevBase, localScore, aiScore, total: ns.insertions + ns.deletions, progressPercent });
   } catch {}
 
   // Persist summary & aggregates & metrics & meta
@@ -169,6 +173,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
       chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
       lastGenAt,
     });
+    if (logger.enabled.info) logger.info('summary persisted', { today, aiScore, localScore, progressPercent, tokens: estTokens, durationMs: summaryRes.durationMs, chunksCount: summaryRes.chunksCount });
     const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
     // attach meta for return

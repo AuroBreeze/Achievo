@@ -20,6 +20,15 @@ contextBridge.exposeInMainWorld('api', {
   summaryTodayDiff: () => ipcRenderer.invoke('summary:todayDiff'),
   diffToday: () => ipcRenderer.invoke('diff:today'),
 
+  // app data directory helpers
+  userDataPath: () => ipcRenderer.invoke('app:userDataPath'),
+  openUserData: () => ipcRenderer.invoke('app:openUserData'),
+  installRoot: () => ipcRenderer.invoke('app:installRoot'),
+  paths: () => ipcRenderer.invoke('app:paths'),
+  openInstallRoot: () => ipcRenderer.invoke('app:openInstallRoot'),
+  openLogDir: () => ipcRenderer.invoke('app:openLogDir'),
+  openDbDir: () => ipcRenderer.invoke('app:openDbDir'),
+
   // window controls
   windowMinimize: () => ipcRenderer.invoke('window:minimize'),
   windowToggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),

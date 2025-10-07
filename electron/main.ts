@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { analyzeDiff } from './services/codeAnalyzer';
 import { scoreProgress } from './services/progressScorer';
 import { summarizeWithAI } from './services/aiSummarizer';
@@ -7,15 +7,22 @@ import { Storage } from './services/storage';
 import { getConfig, setConfig } from './services/config';
 import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
-import { db } from './services/dbInstance';
+import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
+import { applyLoggerConfig, setLogFile, getLogger } from './services/logger';
+import path from 'node:path';
+import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-const tracker = new TrackerService();
-const stats = new StatsService();
+// Create a single DB instance and inject into all services to avoid clobbering the sql.js file
+const dbInstance = new DB();
+const tracker = new TrackerService(dbInstance);
+const stats = new StatsService(dbInstance);
+
+// Local DB instance defined above
 
 let win: BrowserWindow | null = null;
 
@@ -28,10 +35,38 @@ jobManager.onProgress((job) => {
   }
 });
 
+ipcMain.handle('app:installRoot', async () => {
+  try {
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    return installRoot;
+  } catch (e:any) {
+    return process.cwd();
+  }
+});
+
+ipcMain.handle('app:paths', async () => {
+  const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+  const logDir = path.join(installRoot, 'cache', 'log');
+  const dbDir = path.join(installRoot, 'db');
+  return { installRoot, logDir, dbDir };
+});
+
+ipcMain.handle('app:openInstallRoot', async () => {
+  try { const r = await shell.openPath(app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd()); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
+
+ipcMain.handle('app:openLogDir', async () => {
+  try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'cache', 'log'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
+
+ipcMain.handle('app:openDbDir', async () => {
+  try { const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd(); const dir = path.join(installRoot, 'db'); const r = await shell.openPath(dir); return { ok: r === '' }; } catch (e:any) { return { ok: false, error: e?.message || String(e) }; }
+});
+
 // IPC: background job controls
 ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {
-    const res = await generateTodaySummary({ onProgress: onChunk });
+    const res = await generateTodaySummary({ onProgress: onChunk }, { db: dbInstance });
     return {
       date: res.date,
       summary: res.summary,
@@ -60,6 +95,24 @@ async function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  // Apply logger config on startup
+  getConfig().then(cfg => {
+    applyLoggerConfig({ logLevel: cfg.logLevel as any, logNamespaces: (cfg.logNamespaces as any) || [] });
+    try {
+      const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+      const logDir = path.join(installRoot, 'cache', 'log');
+      try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
+      const now = new Date();
+      const pad = (n:number)=>String(n).padStart(2,'0');
+      const half = now.getHours() < 12 ? 'AM' : 'PM';
+      const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${half}`;
+      const baseName = (cfg.logFileName || 'achievo.log').replace(/[/\\]/g,'');
+      const p = cfg.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
+      setLogFile(p);
+      const boot = getLogger('bootstrap');
+      if (boot.enabled.info) boot.info('logger:startup', { installRoot, logDir, logFile: p, level: cfg.logLevel, namespaces: cfg.logNamespaces });
+    } catch {}
+  }).catch(()=>{});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -115,7 +168,25 @@ ipcMain.handle('config:get', async () => {
 });
 
 ipcMain.handle('config:set', async (_evt, cfg: { openaiApiKey?: string; repoPath?: string }) => {
-  return setConfig(cfg);
+  await setConfig(cfg as any);
+  // Re-apply logger config after update
+  try {
+    const merged = await getConfig();
+    applyLoggerConfig({ logLevel: merged.logLevel as any, logNamespaces: (merged.logNamespaces as any) || [] });
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    const logDir = path.join(installRoot, 'cache', 'log');
+    try { if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true }); } catch {}
+    const now = new Date();
+    const pad = (n:number)=>String(n).padStart(2,'0');
+    const half = now.getHours() < 12 ? 'AM' : 'PM';
+    const stamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${half}`;
+    const baseName = (merged.logFileName || 'achievo.log').replace(/[/\\]/g,'');
+    const p = merged.logToFile ? path.join(logDir, `${stamp}_${baseName}`) : null;
+    setLogFile(p);
+    const boot = getLogger('bootstrap');
+    if (boot.enabled.info) boot.info('logger:config:update', { installRoot, logDir, logFile: p, level: merged.logLevel, namespaces: merged.logNamespaces });
+  } catch {}
+  return true;
 });
 
 // Select a local folder
@@ -123,6 +194,21 @@ ipcMain.handle('dialog:selectFolder', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   if (res.canceled || res.filePaths.length === 0) return { canceled: true };
   return { canceled: false, path: res.filePaths[0] };
+});
+
+// App data directory helpers
+ipcMain.handle('app:userDataPath', async () => {
+  return app.getPath('userData');
+});
+
+ipcMain.handle('app:openUserData', async () => {
+  try {
+    const p = app.getPath('userData');
+    const r = await shell.openPath(p);
+    return { ok: r === '' };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 
 // Tracking controls
@@ -148,7 +234,7 @@ ipcMain.handle('stats:getToday', async () => {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   const today = `${yyyy}-${mm}-${dd}`;
-  const row = await db.getDay(today);
+  const row = await dbInstance.getDay(today);
   if (row) return row;
   return {
     date: today,
@@ -172,7 +258,7 @@ ipcMain.handle('stats:getToday', async () => {
 });
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
-  return db.getDaysRange(payload.startDate, payload.endDate);
+  return dbInstance.getDaysRange(payload.startDate, payload.endDate);
 });
 
 ipcMain.handle('summary:generate', async () => {
@@ -187,7 +273,7 @@ ipcMain.handle('tracking:analyzeOnce', async (_evt, payload: { repoPath?: string
 
 // Summarize today's concrete code changes via unified diff
 ipcMain.handle('summary:todayDiff', async () => {
-  const res = await generateTodaySummary();
+  const res = await generateTodaySummary(undefined, { db: dbInstance });
   return {
     date: res.date,
     summary: res.summary,
@@ -206,12 +292,12 @@ ipcMain.handle('summary:todayDiff', async () => {
 
 // Return today's unified diff text for in-app visualization
 ipcMain.handle('diff:today', async () => {
-  return buildTodayUnifiedDiff();
+  return buildTodayUnifiedDiff({ db: dbInstance });
 });
 
 // Totals across all days
 ipcMain.handle('stats:getTotals', async () => {
-  return db.getTotals();
+  return dbInstance.getTotals();
 });
 
 // Live Git-based today's insertions/deletions (includes working tree)

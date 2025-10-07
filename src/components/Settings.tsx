@@ -22,6 +22,14 @@ const Settings: React.FC = () => {
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   const [dbPollSeconds, setDbPollSeconds] = useState<number>(10);
   const [dailyCapRatioPct, setDailyCapRatioPct] = useState<number>(35);
+  // Developer logging
+  const [logLevel, setLogLevel] = useState<'debug'|'info'|'error'>('info');
+  const [logNamespacesText, setLogNamespacesText] = useState<string>('');
+  const [logToFile, setLogToFile] = useState<boolean>(false);
+  const [logFileName, setLogFileName] = useState<string>('achievo.log');
+  const [installRoot, setInstallRoot] = useState<string>('');
+  const [logDir, setLogDir] = useState<string>('');
+  const [dbDir, setDbDir] = useState<string>('');
   // Learning curve (local scoring) parameters
   const [lsColdStartN, setLsColdStartN] = useState<number>(3);
   const [lsWindowDays, setLsWindowDays] = useState<number>(30);
@@ -61,6 +69,24 @@ const Settings: React.FC = () => {
     if (typeof dps === 'number' && dps > 0) setDbPollSeconds(dps);
     const dcr = (cfg as any).dailyCapRatio;
     if (typeof dcr === 'number' && dcr >= 0) setDailyCapRatioPct(Math.round(dcr * 100));
+    const ll = (cfg as any).logLevel;
+    if (ll === 'debug' || ll === 'info' || ll === 'error') setLogLevel(ll);
+    const lns = Array.isArray((cfg as any).logNamespaces) ? ((cfg as any).logNamespaces as string[]) : [];
+    setLogNamespacesText(lns.join(','));
+    const ltf = (cfg as any).logToFile;
+    if (typeof ltf === 'boolean') setLogToFile(ltf);
+    const lfn = (cfg as any).logFileName;
+    if (typeof lfn === 'string' && lfn.trim()) setLogFileName(lfn);
+    try {
+      if ((window as any).api?.paths) {
+        const p = await (window as any).api.paths();
+        if (p && typeof p === 'object') {
+          setInstallRoot(p.installRoot || '');
+          setLogDir(p.logDir || '');
+          setDbDir(p.dbDir || '');
+        }
+      }
+    } catch {}
     const ls = (cfg as any).localScoring || {};
     if (typeof ls.coldStartN === 'number') setLsColdStartN(ls.coldStartN);
     if (typeof ls.windowDays === 'number') setLsWindowDays(ls.windowDays);
@@ -98,6 +124,10 @@ const Settings: React.FC = () => {
       quoteLetterSpacing,
       dbPollSeconds,
       dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+      logLevel,
+      logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
+      logToFile,
+      logFileName: (logFileName || 'achievo.log').trim(),
       localScoring: {
         coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
         windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -118,6 +148,10 @@ const Settings: React.FC = () => {
       window.dispatchEvent(new CustomEvent('config:updated', { detail: {
         quoteFontSize, quoteEnabled, quoteRefreshSeconds, quoteLetterSpacing, dbPollSeconds,
         dailyCapRatio: Math.max(0, Math.min(1, (dailyCapRatioPct || 0) / 100)),
+        logLevel,
+        logNamespaces: logNamespacesText.split(',').map(s=>s.trim()).filter(Boolean),
+        logToFile,
+        logFileName: (logFileName || 'achievo.log').trim(),
         localScoring: {
           coldStartN: Math.max(0, Math.floor(lsColdStartN || 0)),
           windowDays: Math.max(7, Math.floor(lsWindowDays || 30)),
@@ -198,6 +232,100 @@ const Settings: React.FC = () => {
           </div>
         </div>
         <p className="text-xs text-slate-400 mt-2">备注：若未填 AI API Key，将回退到 OpenAI API Key，再回退到环境变量 OPENAI_API_KEY。</p>
+      </section>
+      {/* Card: 开发者选项（日志） */}
+      <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
+        <header className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-slate-100">开发者选项</h3>
+          <span className="text-xs text-slate-400">日志级别与命名空间</span>
+        </header>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">日志级别</label>
+            <select
+              value={logLevel}
+              onChange={e=>setLogLevel(e.target.value as any)}
+              className="w-40 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            >
+              <option value="debug">debug（调试）</option>
+              <option value="info">info（信息）</option>
+              <option value="error">error（错误）</option>
+            </select>
+            <p className="text-xs text-slate-500 mt-1">影响全局日志级别。</p>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">日志命名空间（逗号分隔）</label>
+            <input
+              value={logNamespacesText}
+              onChange={e=>setLogNamespacesText(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder="db,score,ai,git"
+            />
+            <p className="text-xs text-slate-500 mt-1">在 info 级别下，指定的命名空间也会输出 debug 日志。</p>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs text-slate-400 mb-1">写入日志文件</label>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-200">
+              <input type="checkbox" checked={logToFile} onChange={e=>setLogToFile(e.target.checked)} />
+              <span>{logToFile ? '已启用' : '已关闭'}</span>
+            </label>
+            <p className="text-xs text-slate-500 mt-1">将日志以 JSONL 形式写入应用数据目录下的文件。</p>
+          </div>
+          <div className="col-span-1">
+            <label className="block text-xs text-slate-400 mb-1">日志文件名</label>
+            <input
+              value={logFileName}
+              onChange={e=>setLogFileName(e.target.value)}
+              className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+              placeholder="achievo.log"
+              disabled={!logToFile}
+            />
+            <p className="text-xs text-slate-500 mt-1">文件将保存在下方“日志目录”中（保存时会按时间戳生成新文件）。</p>
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">安装目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.installRoot(); setInstallRoot(p||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >刷新路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openInstallRoot(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {installRoot && <p className="text-xs text-slate-400 break-all mt-1">{installRoot}</p>}
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">日志目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.paths(); setLogDir(p?.logDir||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >刷新路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openLogDir(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {logDir && <p className="text-xs text-slate-400 break-all mt-1">{logDir}</p>}
+            <p className="text-xs text-slate-500 mt-1">当前日志文件将保存为：YYYYMMDD-HHMMSS_{logFileName}</p>
+          </div>
+          <div className="col-span-1 flex flex-col gap-2">
+            <label className="block text-xs text-slate-400 mb-1">数据库目录</label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async ()=>{ try { const p = await (window as any).api.paths(); setDbDir(p?.dbDir||''); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >刷新路径</button>
+              <button
+                onClick={async ()=>{ try { await (window as any).api.openDbDir(); } catch{} }}
+                className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors"
+              >打开目录</button>
+            </div>
+            {dbDir && <p className="text-xs text-slate-400 break-all mt-1">{dbDir}\achievo.sqljs</p>}
+          </div>
+        </div>
       </section>
       {/* Card: 学习曲线（本地进步分） */}
       <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">

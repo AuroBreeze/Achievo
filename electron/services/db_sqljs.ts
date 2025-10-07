@@ -7,6 +7,7 @@ import { calcProgressPercentComplex } from './progressCalculator';
 import { computeBaseUpdate } from './baseScoreEngine';
 import { getConfig } from './config';
 import type { Database as SQLDatabase } from 'sql.js';
+import { getLogger } from './logger';
 
 // Default daily cap ratio relative to yesterday's base when config is missing
 const DEFAULT_DAILY_CAP_RATIO = 0.35;
@@ -39,9 +40,14 @@ export class DB {
   private db!: any;
   private filePath: string;
   private ready: Promise<void>;
+  private logger = getLogger('db');
 
   constructor() {
-    this.filePath = path.join(app.getPath('userData'), 'achievo.sqljs');
+    // Resolve install root: exe directory in packaged app; project cwd in dev
+    const installRoot = app.isPackaged ? path.dirname(app.getPath('exe')) : process.cwd();
+    const dbDir = path.join(installRoot, 'db');
+    try { if (!fsSync.existsSync(dbDir)) fsSync.mkdirSync(dbDir, { recursive: true }); } catch {}
+    this.filePath = path.join(dbDir, 'achievo.sqljs');
     this.ready = this.init();
   }
 
@@ -69,11 +75,21 @@ export class DB {
     const yesterday = y ? await this.getDay(y) : null;
     const prevBase = Math.max(100, yesterday?.baseScore || 100);
     const cfg = await getConfig();
-    const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
-    const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
+    const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
     const exists = await this.getDay(date);
     if (!exists) {
-      const trend = yesterday ? Math.round(baseCandidate - yesterday.baseScore) : 0;
+      // compute next base from prevBase with today's lines only, no ai/local at this point
+      const res = computeBaseUpdate({
+        prevBase,
+        currentBase: prevBase,
+        insertions: ins,
+        deletions: del,
+        aiScore: 0,
+        localScore: 0,
+        cfg: { dailyCapRatio: ratio },
+      });
+      const nextBase = res.nextBase;
+      const trend = yesterday ? Math.round(nextBase - yesterday.baseScore) : (res.debug?.incApplied ?? 0);
       // progressPercent derives from complex model using existing (null) ai/local as 0
       const hasChanges = (ins + del) > 0;
       const progressPercent = calcProgressPercentComplex({
@@ -86,7 +102,7 @@ export class DB {
         cap: 25,
       });
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, progressPercent, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [date, ins, del, baseCandidate, trend, progressPercent, null, now, now]);
+        [date, ins, del, nextBase, trend, progressPercent, null, now, now]);
     } else {
       // If today's summary has been generated (lastGenAt present), do NOT mutate baseScore here.
       // Summary becomes authoritative for today's base/trend.
@@ -106,9 +122,19 @@ export class DB {
         this.db.run(`UPDATE days SET insertions=?, deletions=?, trend=?, progressPercent=?, updatedAt=? WHERE date=?`,
           [ins, del, trend, progressPercent, now, date]);
       } else {
-        // Do not let baseScore regress due to periodic line-only recomputation
-        const safeBase = Math.max(Math.max(100, exists.baseScore || 0), baseCandidate);
-        const trend = yesterday ? Math.round(safeBase - yesterday.baseScore) : 0;
+        const currentBase = Math.max(prevBase, Math.max(100, exists.baseScore || 0));
+        const res = computeBaseUpdate({
+          prevBase,
+          currentBase,
+          insertions: ins,
+          deletions: del,
+          aiScore: Math.max(0, exists.aiScore ?? 0),
+          localScore: Math.max(0, exists.localScore ?? 0),
+          cfg: { dailyCapRatio: ratio },
+        });
+        // Do not let baseScore regress; keep at least currentBase
+        const nextBase = Math.max(currentBase, res.nextBase);
+        const trend = yesterday ? Math.round(nextBase - yesterday.baseScore) : (res.debug?.incApplied ?? 0);
         const hasChanges = (ins + del) > 0;
         const progressPercent = calcProgressPercentComplex({
           trend,
@@ -120,7 +146,7 @@ export class DB {
           cap: 25,
         });
         this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, progressPercent=?, updatedAt=? WHERE date=?`,
-          [ins, del, safeBase, trend, progressPercent, now, date]);
+          [ins, del, nextBase, trend, progressPercent, now, date]);
       }
     }
     await this.persist();
@@ -228,23 +254,7 @@ export class DB {
     await fs.writeFile(this.filePath, Buffer.from(data));
   }
 
-  private computeCumulativeBase(prevBase: number, insertions: number, deletions: number, capRatio: number): number {
-    // Daily increment with diminishing returns
-    const wAdded = 1.6;
-    const wRemoved = 0.8;
-    const raw = Math.max(0, insertions) * wAdded + Math.max(0, deletions) * wRemoved;
-    const alpha = 220;
-    const dailyInc = 100 * (1 - Math.exp(-raw / alpha)); // 0..~100 increment
-    const base0 = Math.max(100, prevBase);
-    // Cap the daily increase to capRatio of previous base
-    const ratio = Number.isFinite(capRatio) && capRatio >= 0 && capRatio <= 1 ? capRatio : DEFAULT_DAILY_CAP_RATIO;
-    const incCapped = Math.min(Math.max(0, dailyInc), base0 * ratio);
-    // 避免极小正增量被四舍五入为 0
-    const incApplied = incCapped > 0 && incCapped < 1 ? 1 : Math.round(incCapped);
-    const next = base0 + incApplied;
-    try { if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] computeCumulativeBase', { prevBase: base0, insertions, deletions, dailyInc: Math.round(dailyInc), cap: base0 * ratio, applied: incApplied, next }); } catch {}
-    return next;
-  }
+  // computeCumulativeBase removed; base progression is handled by baseScoreEngine.computeBaseUpdate
 
   async getDay(date: string): Promise<DayRow | null> {
     await this.ready;
@@ -272,11 +282,12 @@ export class DB {
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
       const cfg = await getConfig();
-      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
-      const baseScore = this.computeCumulativeBase(prevBase, ins, del, capRatio);
-      const trend = yesterday ? Math.round(baseScore - yesterday.baseScore) : 0;
+      const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const res = computeBaseUpdate({ prevBase, currentBase: prevBase, insertions: ins, deletions: del, aiScore: 0, localScore: 0, cfg: { dailyCapRatio: ratio } });
+      const nextBase = res.nextBase;
+      const trend = yesterday ? Math.round(nextBase - yesterday.baseScore) : (res.debug?.incApplied ?? 0);
       this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, summary, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [date, ins, del, baseScore, trend, null, now, now]);
+        [date, ins, del, nextBase, trend, null, now, now]);
       await this.persist();
       return (await this.getDay(date))!;
     } else {
@@ -286,12 +297,13 @@ export class DB {
       const yesterday = y ? await this.getDay(y) : null;
       const prevBase = Math.max(100, yesterday?.baseScore || 100);
       const cfg = await getConfig();
-      const capRatio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
-      const baseCandidate = this.computeCumulativeBase(prevBase, ins, del, capRatio);
-      const safeBase = Math.max(Math.max(100, existing.baseScore || 0), baseCandidate);
-      const trend = yesterday ? Math.round(safeBase - yesterday.baseScore) : 0;
+      const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+      const currentBase = Math.max(prevBase, Math.max(100, existing.baseScore || 0));
+      const res = computeBaseUpdate({ prevBase, currentBase, insertions: ins, deletions: del, aiScore: Math.max(0, existing.aiScore ?? 0), localScore: Math.max(0, existing.localScore ?? 0), cfg: { dailyCapRatio: ratio } });
+      const nextBase = Math.max(currentBase, res.nextBase);
+      const trend = yesterday ? Math.round(nextBase - yesterday.baseScore) : (res.debug?.incApplied ?? 0);
       this.db.run(`UPDATE days SET insertions=?, deletions=?, baseScore=?, trend=?, updatedAt=? WHERE date=?`,
-        [ins, del, safeBase, trend, now, date]);
+        [ins, del, nextBase, trend, now, date]);
       await this.persist();
       return (await this.getDay(date))!;
     }
@@ -333,8 +345,8 @@ export class DB {
       localScore: (typeof loc === 'number' ? loc : 0),
       cfg: { dailyCapRatio: ratio },
     });
-    try {
-      if (process.env.ACHIEVO_DEBUG === 'db') console.debug('[DB] setDayMetrics cap', {
+    if (this.logger.enabled.debug) {
+      this.logger.debug('setDayMetrics cap', {
         date,
         prevBase,
         currentBase,
@@ -350,7 +362,7 @@ export class DB {
         incApplied: res.debug?.incApplied,
         nextBase: res.nextBase,
       });
-    } catch {}
+    }
     const nextBase = res.nextBase;
     const trend = y ? Math.round(nextBase - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
 
