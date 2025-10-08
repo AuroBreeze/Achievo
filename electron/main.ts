@@ -479,6 +479,41 @@ ipcMain.handle('stats:getWeekRange', async (_evt, payload: { week: string }) => 
   return getIsoWeekRangeByKey(payload.week);
 });
 
+// Stats: months list that actually have data (summary or lastGenAt)
+ipcMain.handle('stats:getMonthsWithData', async (_evt, payload?: { limit?: number }) => {
+  const db = await getSharedDb();
+  const limit = Math.max(1, Math.min(500, Number(payload?.limit) || 24));
+  return db.getMonthsWithData(limit);
+});
+
+// Stats: months that actually exist in days table
+ipcMain.handle('stats:getMonthsFromDays', async (_evt, payload?: { limit?: number }) => {
+  const db = await getSharedDb();
+  const limit = Math.max(1, Math.min(500, Number(payload?.limit) || 24));
+  return (db as any).getMonthsFromDays(limit);
+});
+
+// Stats: first day date in DB to trim fallback months
+ipcMain.handle('stats:getFirstDayDate', async () => {
+  const db = await getSharedDb();
+  return (db as any).getFirstDayDate();
+});
+
+// Repo first active month from Git history (YYYY-MM)
+ipcMain.handle('stats:getRepoFirstActiveMonth', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) return null;
+  const { GitAnalyzer } = require('./services/gitAnalyzer');
+  const git = new GitAnalyzer(repo);
+  try {
+    const m = await git.getFirstActiveMonth();
+    return m || null;
+  } catch {
+    return null;
+  }
+});
+
 // Summary: generate week summary
 ipcMain.handle('summary:generateWeek', async (_evt, payload: { week: string }) => {
   const cfg = await getConfig();

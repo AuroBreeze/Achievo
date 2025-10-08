@@ -514,11 +514,38 @@ export class DB {
 
   async getMonthsWithData(limit = 24): Promise<string[]> {
     await this.ready;
-    const sql = `SELECT month FROM months WHERE (summary IS NOT NULL AND TRIM(summary)!='') OR lastGenAt IS NOT NULL ORDER BY month DESC LIMIT ${Math.max(1, Math.min(500, Number(limit)||24))}`;
+    // Only return months that have data AND actually have at least one day row
+    const sql = `
+      SELECT month FROM months
+      WHERE (
+        (summary IS NOT NULL AND TRIM(summary)!='') OR lastGenAt IS NOT NULL
+      )
+      AND EXISTS (SELECT 1 FROM days WHERE substr(date,1,7)=months.month)
+      ORDER BY month DESC
+      LIMIT ${Math.max(1, Math.min(500, Number(limit)||24))}
+    `;
     const res = this.db.exec(sql);
     if (!res[0]) return [];
     const rows = mapRow<{month: string}>(res[0]);
     return rows.map(r => r.month).filter(Boolean);
+  }
+
+  // Distinct months that actually have at least one day row
+  async getMonthsFromDays(limit = 24): Promise<string[]> {
+    await this.ready;
+    const res = this.db.exec(`SELECT DISTINCT substr(date,1,7) AS month FROM days ORDER BY month DESC LIMIT ${Math.max(1, Math.min(500, Number(limit)||24))}`);
+    if (!res[0]) return [];
+    const rows = mapRow<{month: string}>(res[0]);
+    return rows.map(r => r.month).filter(Boolean);
+  }
+
+  async getFirstDayDate(): Promise<string | null> {
+    await this.ready;
+    const res = this.db.exec(`SELECT MIN(date) AS first FROM days LIMIT 1`);
+    if (!res[0] || !res[0].values[0]) return null;
+    const row = mapRow<{ first: string }>(res[0])[0];
+    const s = String(row?.first || '').trim();
+    return s || null;
   }
 
   async upsertDayAccumulate(date: string, deltaIns: number, deltaDel: number): Promise<DayRow> {

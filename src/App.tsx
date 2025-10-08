@@ -141,11 +141,32 @@ function App() {
       const ws: string[] = await (window as any).api?.statsGetWeeksInMonth?.({ month: monthKey });
       setHistWeeks(Array.isArray(ws) ? ws : []);
     } catch {}
-    // months list last 12
+    // months list: prefer months from days table; then months with summaries; fallback trimmed by firstDay
     try {
-      const now = new Date();
-      const list: string[] = [];
-      for (let i=0;i<12;i++) { const d = new Date(now); d.setMonth(now.getMonth()-i); list.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }
+      let list: string[] = [];
+      try {
+        const mdays: string[] = await (window as any).api?.statsGetMonthsFromDays?.({ limit: 36 });
+        if (Array.isArray(mdays) && mdays.length) list = mdays;
+      } catch {}
+      if (!list.length) {
+        try {
+          const ms: string[] = await (window as any).api?.statsGetMonthsWithData?.({ limit: 36 });
+          if (Array.isArray(ms) && ms.length) list = ms;
+        } catch {}
+      }
+      if (!list.length) {
+        const now = new Date();
+        // Trim by first day in DB if available
+        let first: string | null = null;
+        try { first = await (window as any).api?.statsGetFirstDayDate?.(); } catch {}
+        const firstMonth = first ? first.slice(0,7) : null;
+        for (let i=0;i<12;i++) {
+          const d = new Date(now); d.setMonth(now.getMonth()-i);
+          const mk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (firstMonth && mk < firstMonth) break;
+          list.push(mk);
+        }
+      }
       setHistMonths(list);
       if (!histSelectedMonth && list.length) setHistSelectedMonth(list[0]!);
     } catch {}

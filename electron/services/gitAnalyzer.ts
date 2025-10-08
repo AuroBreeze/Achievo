@@ -118,10 +118,25 @@ export class GitAnalyzer {
         const ins = aStr === '-' ? 0 : parseInt(aStr, 10) || 0;
         const del = bStr === '-' ? 0 : parseInt(bStr, 10) || 0;
         insertions += ins;
-        deletions += del;
       }
     }
     return { insertions, deletions };
+  }
+
+  // First active commit date (YYYY-MM or YYYY-MM-DD if needed)
+  async getFirstCommitDate(): Promise<string | null> {
+    await this.ensureLongPathsOnce();
+    // Use git log in reverse order and take the first commit date (strict ISO date %cs => YYYY-MM-DD)
+    const out = await this.git.raw(['log', '--reverse', '--format=%cs', 'HEAD']);
+    const line = (out || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || '';
+    if (!line) return null;
+    return line; // YYYY-MM-DD
+  }
+
+  async getFirstActiveMonth(): Promise<string | null> {
+    const d = await this.getFirstCommitDate();
+    if (!d) return null;
+    return d.slice(0, 7); // YYYY-MM
   }
 
   // Get unified diff text since the last commit before the given local-date (YYYY-MM-DD)
