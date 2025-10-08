@@ -16,9 +16,17 @@ export class TrackerService {
   private lastProcessedCommit: string | null = null;
   private lastError: string | null = null;
   private db: DB;
+  private dbProvider?: () => Promise<DB>;
   private repoPath: string | undefined;
   private intervalMs = 30_000; // default 30s
-  constructor(db?: DB) { this.db = db ?? new DB(); }
+  constructor(dbOrOpts?: DB | { dbProvider?: () => Promise<DB> }) {
+    if (dbOrOpts && 'getFilePath' in (dbOrOpts as any)) {
+      this.db = dbOrOpts as DB;
+    } else {
+      this.db = new DB();
+      this.dbProvider = (dbOrOpts as any)?.dbProvider;
+    }
+  }
   private logger = getLogger('tracker');
 
   async start(repoPath?: string, intervalMs?: number) {
@@ -29,8 +37,12 @@ export class TrackerService {
 
     this.repoPath = cfg.repoPath;
     if (!this.repoPath) throw new Error('未设置仓库路径');
-    // Rebind DB to this repo
-    this.db = new DB({ repoPath: this.repoPath });
+    // Rebind DB to this repo (prefer shared provider to avoid multi-instance writes)
+    if (this.dbProvider) {
+      try { this.db = await this.dbProvider(); } catch { this.db = new DB({ repoPath: this.repoPath }); }
+    } else {
+      this.db = new DB({ repoPath: this.repoPath });
+    }
 
     // load last processed commit from config if any
     this.lastProcessedCommit = cfg.lastProcessedCommit ?? null;
@@ -99,8 +111,12 @@ export class TrackerService {
 
     this.repoPath = cfg.repoPath;
     if (!this.repoPath) throw new Error('未设置仓库路径');
-    // Rebind DB to this repo for one-shot
-    this.db = new DB({ repoPath: this.repoPath });
+    // Rebind DB to this repo for one-shot (prefer shared provider)
+    if (this.dbProvider) {
+      try { this.db = await this.dbProvider(); } catch { this.db = new DB({ repoPath: this.repoPath }); }
+    } else {
+      this.db = new DB({ repoPath: this.repoPath });
+    }
     if (this.logger.enabled.info) this.logger.info('analyzeOnce', { repoPath: this.repoPath });
     await this.tick();
     return this.status();

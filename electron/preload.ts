@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('api', {
   statsGetMonthsWithData: (payload?: { limit?: number }) => ipcRenderer.invoke('stats:getMonthsWithData', payload),
   statsGetMonthsFromDays: (payload?: { limit?: number }) => ipcRenderer.invoke('stats:getMonthsFromDays', payload),
   statsGetFirstDayDate: () => ipcRenderer.invoke('stats:getFirstDayDate'),
+  statsGetRepoFirstActiveMonth: () => ipcRenderer.invoke('stats:getRepoFirstActiveMonth'),
   statsGetTotals: () => ipcRenderer.invoke('stats:getTotals'),
   // read-only live counts (no DB writes)
   statsGetTodayLiveReadOnly: () => ipcRenderer.invoke('stats:getTodayLiveReadOnly'),

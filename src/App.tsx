@@ -167,6 +167,13 @@ function App() {
           list.push(mk);
         }
       }
+      // Apply repo first active month trimming if available
+      try {
+        const fam: string | null = await (window as any).api?.statsGetRepoFirstActiveMonth?.();
+        if (fam && typeof fam === 'string') {
+          list = (list || []).filter(mk => mk >= fam);
+        }
+      } catch {}
       setHistMonths(list);
       if (!histSelectedMonth && list.length) setHistSelectedMonth(list[0]!);
     } catch {}

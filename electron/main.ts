@@ -18,8 +18,8 @@ import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-// Tracker manages its own per-repo DB binding internally
-const tracker = new TrackerService();
+// Tracker: inject shared DB provider to avoid multiple instances writing the same file
+const tracker = new TrackerService({ dbProvider: getSharedDb });
 
 // Local DB instance defined above
 
