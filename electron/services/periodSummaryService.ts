@@ -79,7 +79,9 @@ export class PeriodSummaryService {
         return `${y}-W${String(wn).padStart(2, '0')}`;
       })();
       const prev = await this.db.getWeek(prevKey);
-      const prevBase = prev?.baseScore || (days.length ? days[0].baseScore : 0) || 0;
+      const prevBase = (typeof prev?.baseScore === 'number')
+        ? prev.baseScore
+        : ((days.length && days[0]) ? (days[0].baseScore ?? 0) : 0);
       trend = Math.round((lastBase || 0) - prevBase);
     } catch {}
 
@@ -89,7 +91,9 @@ export class PeriodSummaryService {
     let aiScoreFromText: number | null = null;
     if (!offline) {
       try {
-        const aiText = await (summarizeWithAI as any)(merged as any, 0 as any);
+        // Provide a minimal DiffStat for typing: aggregate totals across the week
+        const diff = { added: Math.max(0, ins), removed: Math.max(0, del), changed: 0 } as any;
+        const aiText = await summarizeWithAI(diff, 0);
         // 支持 JSON 或 纯 Markdown
         try {
           const obj = JSON.parse(String(aiText));
@@ -156,8 +160,11 @@ export class PeriodSummaryService {
     // 趋势：与上月末 base 差
     let trend = 0;
     try {
-      const [y, m] = monthKey.split('-').map(Number);
-      const prevMonth = (m > 1) ? `${y}-${String(m - 1).padStart(2, '0')}` : `${y - 1}-12`;
+      const parts = (monthKey || '').split('-');
+      const y = Number(parts[0]);
+      const m = Number(parts[1]);
+      if (!Number.isFinite(y) || !Number.isFinite(m)) throw new Error('bad monthKey');
+      const prevMonth = (m > 1) ? `${y}-${String(m - 1).padStart(2, '0')}` : `${(y - 1)}-12`;
       const prev = await this.db.getMonth(prevMonth);
       const prevBase = prev?.baseScore || 0;
       trend = Math.round((lastBase || 0) - prevBase);
@@ -168,7 +175,9 @@ export class PeriodSummaryService {
     let aiScoreFromText: number | null = null;
     if (!offline) {
       try {
-        const aiText = await summarizeWithAI(merged, 0);
+        // Provide a minimal DiffStat for typing: aggregate totals across the month
+        const diff = { added: Math.max(0, ins), removed: Math.max(0, del), changed: 0 } as any;
+        const aiText = await summarizeWithAI(diff, 0);
         try {
           const obj = JSON.parse(String(aiText));
           const md = obj?.markdown ?? obj?.summary ?? obj?.text;

@@ -126,8 +126,10 @@ ipcMain.handle('db:export', async () => {
       filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
     });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-    fs.copyFileSync(src, res.filePath);
-    return { ok: true, path: res.filePath };
+    // Narrow and normalize to plain string for Node typings
+    const dst: string = String(res.filePath);
+    fs.copyFileSync(src, dst);
+    return { ok: true, path: dst };
   } catch (e:any) {
     return { ok: false, error: e?.message || String(e) };
   }
