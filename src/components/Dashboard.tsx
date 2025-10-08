@@ -180,6 +180,7 @@ const Dashboard: React.FC = () => {
   const [currentRepo, setCurrentRepo] = useState<string>('');
   const currentRepoRef = React.useRef<string>('');
   const repoReloadTimer = React.useRef<number | null>(null);
+  const [offlineMode, setOfflineMode] = useState<boolean>(false);
 
   const loadToday = async () => {
     if (!window.api) return;
@@ -283,6 +284,7 @@ const Dashboard: React.FC = () => {
           const cfg: any = await window.api.getConfig();
           const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
           setPollSeconds(dps);
+          setOfflineMode(!!cfg?.offlineMode);
           if (typeof cfg?.repoPath === 'string') { setCurrentRepo(cfg.repoPath); currentRepoRef.current = cfg.repoPath; }
         }
       } catch {}
@@ -295,6 +297,7 @@ const Dashboard: React.FC = () => {
     const onCfg = (e: any) => {
       const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
       if (dps) setPollSeconds(dps);
+      if (typeof e?.detail?.offlineMode === 'boolean') setOfflineMode(!!e.detail.offlineMode);
       // If repoPath changed, force reload all series from new repo DB
       if (typeof e?.detail?.repoPath === 'string') {
         const rp = e.detail.repoPath;
@@ -556,12 +559,13 @@ const Dashboard: React.FC = () => {
           onClick={generateTodaySummary}
           disabled={todayBusy}
           className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 disabled:opacity-60"
-        >{todayBusy ? `生成中…${jobProgress ? ` ${jobProgress}%` : ''}` : '生成今日总结'}</button>
+        >{todayBusy ? `生成中…${jobProgress ? ` ${jobProgress}%` : ''}` : (offlineMode ? '生成本地摘要（离线）' : '生成今日总结')}</button>
         <button
           onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }}
           className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
         >{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
+        {offlineMode && <span className="px-2 py-1 text-xs rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">离线模式已启用</span>}
         {/* 状态信息已移至 AI 总结卡片的长度信息行 */}
       </section>
       <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">

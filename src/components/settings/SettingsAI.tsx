@@ -7,6 +7,7 @@ const SettingsAI: React.FC = () => {
   const [aiBaseUrl, setAiBaseUrl] = useState<string>('');
   const [aiApiKey, setAiApiKey] = useState<string>('');
   const [openaiApiKey, setOpenaiApiKey] = useState<string>('');
+  const [offlineMode, setOfflineMode] = useState<boolean>(false);
   const [saved, setSaved] = useState<string>('');
   const [dirty, setDirty] = useState<boolean>(false);
 
@@ -19,11 +20,12 @@ const SettingsAI: React.FC = () => {
       setAiBaseUrl(cfg.aiBaseUrl ?? '');
       setAiApiKey(cfg.aiApiKey ?? '');
       setOpenaiApiKey(cfg.openaiApiKey ?? '');
+      setOfflineMode(!!cfg.offlineMode);
     } catch {}
   };
 
   useEffect(() => { refresh(); }, []);
-  useEffect(() => { setDirty(true); }, [aiProvider, aiModel, aiBaseUrl, aiApiKey, openaiApiKey]);
+  useEffect(() => { setDirty(true); }, [aiProvider, aiModel, aiBaseUrl, aiApiKey, openaiApiKey, offlineMode]);
 
   const save = async () => {
     setSaved('');
@@ -34,11 +36,12 @@ const SettingsAI: React.FC = () => {
         aiBaseUrl,
         aiApiKey,
         openaiApiKey,
+        offlineMode,
       });
       setSaved('已保存');
       setDirty(false);
       showToast('AI 设置已保存', 'success');
-      try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { aiProvider, aiModel } })); } catch {}
+      try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { aiProvider, aiModel, offlineMode } })); } catch {}
     } catch {}
   };
 
@@ -48,13 +51,15 @@ const SettingsAI: React.FC = () => {
         <h3 className="text-sm font-semibold text-slate-100">AI 设置</h3>
         {saved && <span className="text-green-400 text-sm">{saved}</span>}
       </header>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${offlineMode ? 'opacity-90' : ''}`}>
         <div>
           <label className="block text-xs text-slate-400 mb-1">提供商</label>
           <select
             value={aiProvider}
             onChange={e=>setAiProvider(e.target.value as any)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            disabled={offlineMode}
+            title={offlineMode ? '离线模式启用中：AI 设置不可编辑' : ''}
+            className={`w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50 ${offlineMode ? 'cursor-not-allowed opacity-60' : ''}`}
           >
             <option value="openai">OpenAI</option>
             <option value="deepseek">DeepSeek</option>
@@ -66,7 +71,9 @@ const SettingsAI: React.FC = () => {
           <input
             value={aiModel}
             onChange={e=>setAiModel(e.target.value)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            disabled={offlineMode}
+            title={offlineMode ? '离线模式启用中：AI 设置不可编辑' : ''}
+            className={`w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50 ${offlineMode ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder={aiProvider==='deepseek' ? 'deepseek-chat' : 'gpt-4o-mini'}
           />
         </div>
@@ -75,7 +82,9 @@ const SettingsAI: React.FC = () => {
           <input
             value={aiBaseUrl}
             onChange={e=>setAiBaseUrl(e.target.value)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            disabled={offlineMode}
+            title={offlineMode ? '离线模式启用中：AI 设置不可编辑' : ''}
+            className={`w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50 ${offlineMode ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder={aiProvider==='deepseek' ? 'https://api.deepseek.com' : 'https://your.api/base'}
           />
         </div>
@@ -84,7 +93,9 @@ const SettingsAI: React.FC = () => {
           <input
             value={aiApiKey}
             onChange={e=>setAiApiKey(e.target.value)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            disabled={offlineMode}
+            title={offlineMode ? '离线模式启用中：AI 设置不可编辑' : ''}
+            className={`w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50 ${offlineMode ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder={aiProvider==='deepseek' ? 'sk-...' : 'sk-...'}
           />
         </div>
@@ -93,9 +104,18 @@ const SettingsAI: React.FC = () => {
           <input
             value={openaiApiKey}
             onChange={e=>setOpenaiApiKey(e.target.value)}
-            className="w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            disabled={offlineMode}
+            title={offlineMode ? '离线模式启用中：AI 设置不可编辑' : ''}
+            className={`w-full bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50 ${offlineMode ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="sk-..."
           />
+        </div>
+        <div className="md:col-span-2">
+          <label className="flex items-center gap-2 text-xs text-slate-300 mb-1">
+            <input type="checkbox" checked={offlineMode} onChange={e=>setOfflineMode(e.target.checked)} />
+            启用离线模式（不调用外部 AI 服务）
+          </label>
+          <p className="text-xs text-slate-500">开启后，“生成今日总结”将使用本地摘要（基于改动统计与特征），可随时关闭以恢复 AI 总结。</p>
         </div>
       </div>
       <div className="mt-3">
