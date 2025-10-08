@@ -9,6 +9,7 @@ import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
 import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
+import { PeriodSummaryService } from './services/periodSummaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
 import { applyLoggerConfig, setLogFile, getLogger } from './services/logger';
@@ -17,12 +18,24 @@ import fs from 'node:fs';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const storage = new Storage();
-// Tracker manages its own per-repo DB binding internally
-const tracker = new TrackerService();
+// Tracker: inject shared DB provider to avoid multiple instances writing the same file
+const tracker = new TrackerService({ dbProvider: getSharedDb });
 
 // Local DB instance defined above
 
 let win: BrowserWindow | null = null;
+// Shared DB instance cache per current repo to avoid reloading file repeatedly and reduce race windows
+let sharedDb: DB | null = null;
+let sharedRepoPath: string | null = null;
+async function getSharedDb(): Promise<DB> {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!sharedDb || sharedRepoPath !== repo) {
+    sharedDb = new DB({ repoPath: repo });
+    sharedRepoPath = repo || null;
+  }
+  return sharedDb;
+}
 
 // --- Background job manager for today's summary ---
 const jobManager = new JobManager();
@@ -32,6 +45,38 @@ jobManager.onProgress((job) => {
     try { win.webContents.send('summary:job:progress', { id: job.id, progress: job.progress, status: job.status }); } catch {}
   }
 });
+
+// Shared helper: auto-save today's data atomically, merging maxima and pausing tracker
+async function autoSaveTodayInternal(payload?: { summary?: string; aiScore?: number; localScore?: number; progressPercent?: number }) {
+  const wasRunning = (await tracker.status()).running;
+  if (wasRunning) { try { tracker.stop(); } catch {} }
+  try {
+    const cfg = await getConfig();
+    const repo = cfg.repoPath;
+    if (!repo) throw new Error('未设置仓库路径');
+    const db = new DB({ repoPath: repo });
+    const { GitAnalyzer } = require('./services/gitAnalyzer');
+    const git = new GitAnalyzer(repo);
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const ns = await git.getNumstatSinceDate(today);
+    // Apply in one batched call with maxima merge and overwriteToday for authoritative recompute
+    await db.applyTodayUpdate(today, {
+      counts: { insertions: ns.insertions, deletions: ns.deletions },
+      metrics: { aiScore: payload?.aiScore, localScore: payload?.localScore, progressPercent: payload?.progressPercent },
+      summary: (typeof payload?.summary === 'string' && payload.summary.trim()) ? payload!.summary! : undefined as any,
+      overwriteToday: true,
+      mergeByMax: true,
+    });
+    const updated: any = await db.getDay(today);
+    return { ok: true, date: today, insertions: updated?.insertions ?? ns.insertions, deletions: updated?.deletions ?? ns.deletions };
+  } catch (e:any) {
+    return { ok: false, error: e?.message || String(e) };
+  } finally {
+    const st = await tracker.status();
+    if (!st.running) { try { await tracker.start(undefined, undefined); } catch {} }
+  }
+}
 
 ipcMain.handle('app:installRoot', async () => {
   try {
@@ -63,8 +108,7 @@ ipcMain.handle('app:openDbDir', async () => {
 
 // DB helper: return current DB file path for active repo
 ipcMain.handle('db:currentFile', async () => {
-  const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
   return db.getFilePath();
 });
 
@@ -82,8 +126,10 @@ ipcMain.handle('db:export', async () => {
       filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
     });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-    fs.copyFileSync(src, res.filePath);
-    return { ok: true, path: res.filePath };
+    // After the guard above, filePath is non-null
+    const dst = res.filePath!;
+    fs.copyFileSync(src, dst);
+    return { ok: true, path: dst };
   } catch (e:any) {
     return { ok: false, error: e?.message || String(e) };
   }
@@ -151,6 +197,10 @@ ipcMain.handle('summary:job:start', async () => {
   const job = await jobManager.startTodaySummaryJob(async (onChunk) => {
     // Let summary service bind DB by current repoPath via ports
     const res = await generateTodaySummary({ onProgress: onChunk });
+    // After generating summary, perform an atomic auto-save to persist maxima and lock values
+    try { await autoSaveTodayInternal({ summary: res.summary, aiScore: res.scoreAi, localScore: res.scoreLocal, progressPercent: res.progressPercent }); } catch {}
+    // Notify renderer to refresh dashboard data once
+    if (win) { try { win.webContents.send('stats:refresh'); } catch {} }
     return {
       date: res.date,
       summary: res.summary,
@@ -320,7 +370,7 @@ ipcMain.handle('stats:getToday', async () => {
   const today = `${yyyy}-${mm}-${dd}`;
   // Bind DB to current repo for this call
   const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
   let row = await db.getDay(today);
   if (row) {
     // Ensure trend is consistent with baseScore and yesterday base after repo switch or restart
@@ -334,6 +384,20 @@ ipcMain.handle('stats:getToday', async () => {
       if ((row as any).trend !== shouldTrend) {
         await db.setDayBaseScore(today, (row as any).baseScore);
         row = await db.getDay(today);
+      }
+    } catch {}
+    // If summary is temporarily empty during generation, fallback to latest job result to avoid UI flicker
+    try {
+      const st: any = await jobManager.getTodayJobStatus();
+      const r = st?.result;
+      const hasDbSummary = typeof (row as any).summary === 'string' && String((row as any).summary).trim();
+      if (!hasDbSummary && r && typeof r.summary === 'string' && r.summary.trim()) {
+        row = { ...(row as any), summary: r.summary } as any;
+        if (typeof r.scoreAi === 'number') (row as any).aiScore = r.scoreAi;
+        if (typeof r.scoreLocal === 'number') (row as any).localScore = r.scoreLocal;
+        if (typeof r.progressPercent === 'number') (row as any).progressPercent = r.progressPercent;
+        if (typeof r.lastGenAt === 'number') (row as any).lastGenAt = r.lastGenAt;
+        if (typeof r.chunksCount === 'number') (row as any).chunksCount = r.chunksCount;
       }
     } catch {}
     return row;
@@ -361,16 +425,124 @@ ipcMain.handle('stats:getToday', async () => {
 
 ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endDate: string }) => {
   const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
   return db.getDaysRange(payload.startDate, payload.endDate);
 });
 
-ipcMain.handle('summary:generate', async () => {
-  // Create a stats service bound to current repo DB
+// Single day by date (YYYY-MM-DD)
+ipcMain.handle('stats:getDay', async (_evt, payload: { date: string }) => {
   const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
+  return db.getDay(payload.date);
+});
+
+// Helpers: week range by ISO week key (YYYY-Www)
+function getIsoWeekRangeByKey(weekKey: string): { start: string; end: string } | null {
+  const m = /^([0-9]{4})-W([0-9]{2})$/.exec(String(weekKey));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const w = Number(m[2]);
+  const firstThursday = new Date(Date.UTC(year, 0, 4));
+  const dayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - dayNum + 3);
+  const target = new Date(firstThursday);
+  target.setUTCDate(firstThursday.getUTCDate() + (w - 1) * 7);
+  const monday = new Date(target);
+  monday.setUTCDate(target.getUTCDate() - 3);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const toKey = (x: Date) => new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate())).toISOString().slice(0, 10);
+  return { start: toKey(monday), end: toKey(sunday) };
+}
+
+// Stats: week by key
+ipcMain.handle('stats:getWeek', async (_evt, payload: { week: string }) => {
+  const cfg = await getConfig();
+  const db = await getSharedDb();
+  return db.getWeek(payload.week);
+});
+
+// Stats: month by key
+ipcMain.handle('stats:getMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = await getSharedDb();
+  return db.getMonth(payload.month);
+});
+
+// Stats: weeks in a month
+ipcMain.handle('stats:getWeeksInMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = await getSharedDb();
+  return db.getWeeksInMonth(payload.month);
+});
+
+// Stats: week range helper
+ipcMain.handle('stats:getWeekRange', async (_evt, payload: { week: string }) => {
+  return getIsoWeekRangeByKey(payload.week);
+});
+
+// Stats: months list that actually have data (summary or lastGenAt)
+ipcMain.handle('stats:getMonthsWithData', async (_evt, payload?: { limit?: number }) => {
+  const db = await getSharedDb();
+  const limit = Math.max(1, Math.min(500, Number(payload?.limit) || 24));
+  return db.getMonthsWithData(limit);
+});
+
+// Stats: months that actually exist in days table
+ipcMain.handle('stats:getMonthsFromDays', async (_evt, payload?: { limit?: number }) => {
+  const db = await getSharedDb();
+  const limit = Math.max(1, Math.min(500, Number(payload?.limit) || 24));
+  return (db as any).getMonthsFromDays(limit);
+});
+
+// Stats: first day date in DB to trim fallback months
+ipcMain.handle('stats:getFirstDayDate', async () => {
+  const db = await getSharedDb();
+  return (db as any).getFirstDayDate();
+});
+
+// Repo first active month from Git history (YYYY-MM)
+ipcMain.handle('stats:getRepoFirstActiveMonth', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) return null;
+  const { GitAnalyzer } = require('./services/gitAnalyzer');
+  const git = new GitAnalyzer(repo);
+  try {
+    const m = await git.getFirstActiveMonth();
+    return m || null;
+  } catch {
+    return null;
+  }
+});
+
+// Summary: generate week summary
+ipcMain.handle('summary:generateWeek', async (_evt, payload: { week: string }) => {
+  const cfg = await getConfig();
+  const db = await getSharedDb();
+  const svc = new PeriodSummaryService(db);
+  const row = await svc.generateWeekSummary(payload.week);
+  if (win) { try { win.webContents.send('period:summary:updated', { scope: 'week', key: payload.week }); } catch {} }
+  return row;
+});
+
+// Summary: generate month summary
+ipcMain.handle('summary:generateMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = await getSharedDb();
+  const svc = new PeriodSummaryService(db);
+  const row = await svc.generateMonthSummary(payload.month);
+  if (win) { try { win.webContents.send('period:summary:updated', { scope: 'month', key: payload.month }); } catch {} }
+  return row;
+});
+
+ipcMain.handle('summary:generate', async () => {
+  const db = await getSharedDb();
   const stats = new StatsService(db);
-  return stats.generateOnDemandSummary();
+  const r = await stats.generateOnDemandSummary();
+  // Notify renderer to refresh once for on-demand generate
+  if (win) { try { win.webContents.send('stats:refresh'); } catch {} }
+  return r;
 });
 
 // Manual one-shot analyze (no timers)
@@ -405,25 +577,36 @@ ipcMain.handle('diff:today', async () => {
 
 // Totals across all days
 ipcMain.handle('stats:getTotals', async () => {
-  const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
   return db.getTotals();
 });
 
-// Live Git-based today's insertions/deletions (includes working tree)
-ipcMain.handle('stats:getTodayLive', async () => {
-  const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
-  const stats = new StatsService(db);
-  return stats.getTodayLive();
-});
+// NOTE: read-write live interface 'stats:getTodayLive' has been removed.
+// Use 'stats:getTodayLiveReadOnly' for display-only live counts.
 
 // Live totals: adjust DB totals by replacing today's DB counts with live Git counts
 ipcMain.handle('stats:getTotalsLive', async () => {
   const cfg = await getConfig();
-  const db = new DB({ repoPath: cfg.repoPath });
+  const db = await getSharedDb();
   const stats = new StatsService(db);
   return stats.getTotalsLive();
+});
+
+// Read-only live Git counts for today (no DB writes)
+ipcMain.handle('stats:getTodayLiveReadOnly', async () => {
+  const cfg = await getConfig();
+  const repo = cfg.repoPath;
+  if (!repo) throw new Error('未设置仓库路径');
+  const git = new (require('./services/gitAnalyzer').GitAnalyzer)(repo);
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const ns = await git.getNumstatSinceDate(today);
+  return { date: today, insertions: ns.insertions, deletions: ns.deletions };
+});
+
+// Atomic auto-save for today's data: merge maxima and persist; pauses tracker during operation
+ipcMain.handle('repo:autoSaveToday', async (_evt, payload?: { summary?: string; aiScore?: number; localScore?: number; progressPercent?: number }) => {
+  return autoSaveTodayInternal(payload);
 });
 
 // Window control handlers

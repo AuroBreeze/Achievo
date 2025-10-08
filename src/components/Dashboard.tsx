@@ -180,13 +180,78 @@ const Dashboard: React.FC = () => {
   const [currentRepo, setCurrentRepo] = useState<string>('');
   const currentRepoRef = React.useRef<string>('');
   const repoReloadTimer = React.useRef<number | null>(null);
+  const [offlineMode, setOfflineMode] = useState<boolean>(false);
+  // guard against stale async updates when multiple loads race (per-loader tokens)
+  const seqTodayRef = React.useRef<number>(0);
+  const seqTotalsRef = React.useRef<number>(0);
+  const seqLiveRef = React.useRef<number>(0);
+  const seqRangeRef = React.useRef<number>(0);
+  const refreshSeqRef = React.useRef<number>(0);
+
+  // unified refresh to avoid interleaved state updates
+  const refreshAll = React.useCallback(async () => {
+    const rseq = ++refreshSeqRef.current;
+    if (!window.api) return;
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      // 1) 优先获取并应用今日行，确保摘要/基础分/趋势先稳定渲染
+      try {
+        const tv: any = await window.api.statsGetToday();
+        if (rseq !== refreshSeqRef.current) return;
+        setToday(tv);
+        const dbSummary = typeof tv?.summary === 'string' ? String(tv.summary).trim() : '';
+        if (dbSummary) setTodayText(dbSummary);
+        if (typeof tv?.localScore === 'number') setScoreLocal(tv.localScore);
+        if (typeof tv?.aiScore === 'number') setScoreAi(tv.aiScore);
+        if (typeof tv?.progressPercent === 'number') setProgressPercent(tv.progressPercent);
+        setLastGenAt(tv?.lastGenAt ?? null);
+        setChunksCount(typeof tv?.chunksCount === 'number' ? tv.chunksCount : null);
+        setAiModel(tv?.aiModel ?? null);
+        setAiProvider(tv?.aiProvider ?? null);
+        setAiTokens(typeof tv?.aiTokens === 'number' ? tv.aiTokens : null);
+        setAiDurationMs(typeof tv?.aiDurationMs === 'number' ? tv.aiDurationMs : null);
+      } catch {}
+      // 2) 再并行其余读取，按需应用
+      const [live, totalsLive, totalsDb, range] = await Promise.allSettled([
+        (window.api as any).statsGetTodayLiveReadOnly?.(),
+        window.api.statsGetTotalsLive(),
+        window.api.statsGetTotals(),
+        window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) }),
+      ]);
+      if (rseq !== refreshSeqRef.current) return;
+      if (live.status === 'fulfilled') setTodayLive(live.value as any);
+      if (totalsLive.status === 'fulfilled' && totalsLive.value) setTotals(totalsLive.value as any);
+      else if (totalsDb.status === 'fulfilled' && totalsDb.value) setTotals(totalsDb.value as any);
+      if (range.status === 'fulfilled' && Array.isArray(range.value)) {
+        type RowIn = { date: string; baseScore: number; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null };
+        const mapped = ((range.value || []) as RowIn[])
+          .map((r: RowIn) => ({
+            date: r.date,
+            baseScore: r.baseScore,
+            aiScore: (r as any).aiScore ?? null,
+            localScore: (r as any).localScore ?? null,
+            progressPercent: (r as any).progressPercent ?? null,
+          }))
+          .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+        setDaily(mapped);
+      }
+    } catch {}
+  }, []);
 
   const loadToday = async () => {
+    const seq = ++seqTodayRef.current;
     if (!window.api) return;
     const t = await window.api.statsGetToday();
+    if (seq !== seqTodayRef.current) return;
     setToday(t);
-    // set summary text from DB to avoid stale value when switching repos
-    setTodayText(String(t?.summary || ''));
+    // only overwrite summary when DB has non-empty content to prevent accidental clearing
+    const dbSummary = typeof t?.summary === 'string' ? t.summary.trim() : '';
+    if (dbSummary) {
+      setTodayText(dbSummary);
+    }
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
@@ -211,7 +276,7 @@ const Dashboard: React.FC = () => {
           if (typeof md === 'string' && md.trim()) s = md;
         } catch {}
       }
-      setTodayText(s);
+      if (s && s.trim()) setTodayText(s);
       // derive chunks count if DB meta not present
       if (t && typeof (t as any).chunksCount !== 'number') {
         try {
@@ -223,6 +288,7 @@ const Dashboard: React.FC = () => {
   };
 
   const loadTotals = async () => {
+    const seq = ++seqTotalsRef.current;
     if (!window.api) return;
     let t2: { insertions: number; deletions: number; total: number } | null = null;
     try {
@@ -230,13 +296,16 @@ const Dashboard: React.FC = () => {
     } catch {
       t2 = await window.api.statsGetTotals();
     }
+    if (seq !== seqTotalsRef.current) return;
     setTotals(t2);
   };
 
   const loadTodayLive = async () => {
+    const seq = ++seqLiveRef.current;
     if (!window.api) return;
     try {
-      const r = await window.api.statsGetTodayLive();
+      const r = await (window.api as any).statsGetTodayLiveReadOnly?.();
+      if (seq !== seqLiveRef.current) return;
       setTodayLive(r);
     } catch {}
   };
@@ -256,6 +325,7 @@ const Dashboard: React.FC = () => {
   };
 
   const loadDailyRange = React.useCallback(async () => {
+    const seq = ++seqRangeRef.current;
     if (!window.api?.statsGetRange) return;
     const end = new Date();
     const start = new Date();
@@ -272,6 +342,7 @@ const Dashboard: React.FC = () => {
         progressPercent: (r as any).progressPercent ?? null,
       }))
       .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+    if (seq !== seqRangeRef.current) return;
     setDaily(mapped);
   }, []);
 
@@ -283,18 +354,22 @@ const Dashboard: React.FC = () => {
           const cfg: any = await window.api.getConfig();
           const dps = typeof cfg?.dbPollSeconds === 'number' && cfg.dbPollSeconds > 0 ? cfg.dbPollSeconds : 10;
           setPollSeconds(dps);
+          setOfflineMode(!!cfg?.offlineMode);
           if (typeof cfg?.repoPath === 'string') { setCurrentRepo(cfg.repoPath); currentRepoRef.current = cfg.repoPath; }
         }
       } catch {}
-      await loadTodayLive();
-      await loadToday();
-      await loadTotals();
-      await loadDailyRange();
+      await refreshAll();
     })();
     // listen for config changes
     const onCfg = (e: any) => {
       const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
       if (dps) setPollSeconds(dps);
+      if (typeof e?.detail?.offlineMode === 'boolean') {
+        const nextOffline = !!e.detail.offlineMode;
+        setOfflineMode(nextOffline);
+        // 切换离线/在线后，立即从 DB 端读取今日与图表，避免 UI 依赖旧的本地缓存
+        (async () => { await refreshAll(); })();
+      }
       // If repoPath changed, force reload all series from new repo DB
       if (typeof e?.detail?.repoPath === 'string') {
         const rp = e.detail.repoPath;
@@ -322,29 +397,24 @@ const Dashboard: React.FC = () => {
           setJobProgress(0);
           // Immediate reload for the selected repo to avoid stale display
           if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
-          (async () => {
-            await loadTodayLive();
-            await loadToday();
-            await loadTotals();
-            await loadDailyRange();
-          })();
+          (async () => { await refreshAll(); })();
         }
       }
     };
     window.addEventListener('config:updated' as any, onCfg as any);
     return () => { window.removeEventListener('config:updated' as any, onCfg as any); };
-  }, [loadDailyRange]);
+  }, [loadDailyRange, refreshAll]);
 
   React.useEffect(() => {
-    const ms = Math.max(1000, (pollSeconds || 10) * 1000);
+    // 忙碌时降低轮询频率：翻倍且不小于 20s
+    const base = Math.max(1, (pollSeconds || 10));
+    const eff = todayBusy ? Math.max(20, base * 2) : base;
+    const ms = Math.max(1000, eff * 1000);
     const id = setInterval(async () => {
-      await loadTodayLive();
-      await loadToday();
-      await loadTotals();
-      await loadDailyRange();
+      await refreshAll();
     }, ms);
     return () => clearInterval(id);
-  }, [pollSeconds, loadDailyRange]);
+  }, [pollSeconds, todayBusy, refreshAll]);
 
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
@@ -380,10 +450,7 @@ const Dashboard: React.FC = () => {
           }
         } catch {}
         // Refresh persisted values
-        await loadToday();
-        await loadTotals();
-        await loadTodayLive();
-        await loadDailyRange();
+        await refreshAll();
       }
     });
     (async () => {
@@ -404,15 +471,25 @@ const Dashboard: React.FC = () => {
           if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
           if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
           if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
-          await loadToday();
-          await loadTotals();
-          await loadTodayLive();
-          await loadDailyRange();
+          await refreshAll();
         }
       } catch {}
     })();
     return () => { try { off && off(); } catch {} };
   }, [loadDailyRange]);
+
+  // When a summary completes, main will emit 'stats:refresh' once; listen and refresh dashboard.
+  // Also, re-register a one-shot listener whenever we enter busy state.
+  React.useEffect(() => {
+    if ((window as any).api?.onStatsRefreshOnce) {
+      (window as any).api.onStatsRefreshOnce(async () => { await refreshAll(); });
+    }
+  }, []);
+  React.useEffect(() => {
+    if (todayBusy && (window as any).api?.onStatsRefreshOnce) {
+      (window as any).api.onStatsRefreshOnce(async () => { await refreshAll(); });
+    }
+  }, [todayBusy, refreshAll]);
 
   // derive trend from daily array when API trend is missing or stale
   React.useEffect(() => {
@@ -556,12 +633,13 @@ const Dashboard: React.FC = () => {
           onClick={generateTodaySummary}
           disabled={todayBusy}
           className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 disabled:opacity-60"
-        >{todayBusy ? `生成中…${jobProgress ? ` ${jobProgress}%` : ''}` : '生成今日总结'}</button>
+        >{todayBusy ? `生成中…${jobProgress ? ` ${jobProgress}%` : ''}` : (offlineMode ? '生成本地摘要（离线）' : '生成今日总结')}</button>
         <button
           onClick={async () => { setDiffOpen(v=>!v); if (!diffText) await loadTodayDiff(); }}
           className="px-4 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600"
         >{diffOpen ? '隐藏今日改动详情' : '查看今日改动详情'}</button>
         {error && <span className="text-red-400">{error}</span>}
+        {offlineMode && <span className="px-2 py-1 text-xs rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">离线模式已启用</span>}
         {/* 状态信息已移至 AI 总结卡片的长度信息行 */}
       </section>
       <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">

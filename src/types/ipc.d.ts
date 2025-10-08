@@ -18,8 +18,11 @@ declare global {
       summaryTodayDiff(): Promise<{ date: string; summary: string; scoreAi?: number; scoreLocal?: number; progressPercent?: number; featuresSummary?: string }>;
       diffToday(): Promise<{ date: string; diff: string }>;
       statsGetTotals(): Promise<{ insertions: number; deletions: number; total: number }>;
-      statsGetTodayLive(): Promise<{ date: string; insertions: number; deletions: number }>;
+      // read-only live counts (no DB writes)
+      statsGetTodayLiveReadOnly(): Promise<{ date: string; insertions: number; deletions: number }>;
       statsGetTotalsLive(): Promise<{ insertions: number; deletions: number; total: number }>;
+      // repo auto-save: merge maxima and persist atomically
+      repoAutoSaveToday(payload?: { summary?: string; aiScore?: number; localScore?: number; progressPercent?: number }): Promise<{ ok: boolean; error?: string; date?: string; insertions?: number; deletions?: number }>;
 
       // window controls
       windowMinimize(): Promise<void>;
@@ -32,6 +35,8 @@ declare global {
       startSummaryJob(): Promise<{ ok: boolean; error?: string; job: { id: string; type: 'today-summary'; status: 'idle' | 'running' | 'done' | 'error'; progress: number; startedAt?: number; finishedAt?: number; error?: string; result?: { date: string; summary: string; scoreAi: number; scoreLocal: number; progressPercent: number; featuresSummary: string } } }>;
       getSummaryJobStatus(): Promise<{ id: string; type: 'today-summary'; status: 'idle' | 'running' | 'done' | 'error'; progress: number; startedAt?: number; finishedAt?: number; error?: string; result?: { date: string; summary: string; scoreAi: number; scoreLocal: number; progressPercent: number; featuresSummary: string } }>;
       onSummaryJobProgress(callback: (payload: { id: string; progress: number; status: 'idle' | 'running' | 'done' | 'error' }) => void): () => void;
+      // one-shot refresh signal after summary generation completes
+      onStatsRefreshOnce(callback: () => void): void;
     };
   }
 }

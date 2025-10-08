@@ -105,19 +105,44 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Numstat for counts & context
   const ns = await git.getNumstatSinceDate(today);
 
-  // Prefer chunked summarization to avoid context overflow; fallback to single-shot
-  let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
+  // 在摘要流程早期，尽量缩小与实时写入的竞态窗口：
+  // 1) 确保今日行存在（若不存在则插入空行）
+  // 2) 立即写入 lastGenAt 标记“生成中”，使其它写入命中保护逻辑
   try {
-    summaryRes = await summarizer.summarizeUnifiedDiffChunked(diff, {
-      insertions: ns.insertions,
-      deletions: ns.deletions,
-      prevBaseScore: prevBase,
-      localScore,
-      features: feats,
-      onProgress: (done, total) => opts?.onProgress?.(done, total),
-    });
-  } catch {
-    summaryRes = await summarizer.summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+    await pdb.setDayCounts(today, 0, 0);
+    await pdb.setDayAiMeta(today, { lastGenAt: Date.now() });
+  } catch {}
+
+  // Prefer chunked summarization to avoid context overflow; fallback到单次；若离线则本地生成摘要
+  let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
+  const offline = !!(cfg as any)?.offlineMode;
+  if (offline) {
+    const lines: string[] = [];
+    lines.push(`# 今日改动（离线摘要）`);
+    lines.push('');
+    lines.push(`- 代码文件: ${feats.codeFiles} · 测试: ${feats.testFiles} · 文档: ${feats.docFiles} · 配置: ${feats.configFiles}`);
+    lines.push(`- 改动片段(Hunks): ${feats.hunks} · 重命名/移动: ${feats.renameOrMove ? '是' : '否'}`);
+    const langs = Object.keys(feats.languages || {});
+    if (langs.length) lines.push(`- 语言: ${langs.join(', ')}`);
+    lines.push(`- 今日行数: +${ns.insertions} / -${ns.deletions}`);
+    if (feats.dependencyChanges) lines.push(`- 依赖变更: 是`);
+    if (feats.hasSecuritySensitive) lines.push(`- 安全敏感改动: 需关注`);
+    lines.push('');
+    lines.push('> 离线模式已启用：未调用外部 AI 服务。可在设置中关闭离线模式以生成完整 AI 总结。');
+    summaryRes = { text: lines.join('\n'), model: undefined, provider: undefined, tokens: undefined, durationMs: undefined, chunksCount: undefined };
+  } else {
+    try {
+      summaryRes = await summarizer.summarizeUnifiedDiffChunked(diff, {
+        insertions: ns.insertions,
+        deletions: ns.deletions,
+        prevBaseScore: prevBase,
+        localScore,
+        features: feats,
+        onProgress: (done, total) => opts?.onProgress?.(done, total),
+      });
+    } catch {
+      summaryRes = await summarizer.summarizeUnifiedDiff(diff, { insertions: ns.insertions, deletions: ns.deletions, prevBaseScore: prevBase, localScore, features: feats });
+    }
   }
 
   let aiScore = 0;
@@ -132,9 +157,9 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
 
   // Compute blended progress percent using trend, prevBase, local/localScore, aiScore, and total changes
   const hasChanges = (ns.insertions + ns.deletions) > 0 || (localScore > 0) || (feats.hunks > 0);
-  // Persist counts first so today's trend/base are up-to-date
+  // 先持久化“总量”计数：Git 自当天起的累计，应使用 setDayCounts（非增量）
   try {
-    await pdb.upsertDayAccumulate(today, ns.insertions, ns.deletions);
+    await pdb.setDayCounts(today, ns.insertions, ns.deletions);
   } catch {}
   let progressPercent = 0;
   try {
@@ -155,25 +180,30 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Persist summary & aggregates & metrics & meta
   try {
     const existed = await pdb.getDay(today);
-    if (!existed) await pdb.upsertDayAccumulate(today, 0, 0);
+    // setDayCounts 已确保行存在，这里仅在有内容时写入摘要
     if (markdown) await pdb.setDaySummary(today, markdown);
     await pdb.updateAggregatesForDate(today);
   } catch {}
   try {
     const lastGenAt = Date.now();
-    await pdb.setDayMetrics(today, { aiScore, localScore, localScoreRaw, progressPercent }, { overwriteToday: true });
-    const estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
-      ? summaryRes.tokens
-      : Math.max(1, Math.round((markdown?.length || 0) / 4));
-    await pdb.setDayAiMeta(today, {
-      aiModel: summaryRes.model || undefined,
-      aiProvider: summaryRes.provider || undefined,
-      aiTokens: estTokens,
-      aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
-      chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
-      lastGenAt,
-    });
-    if (logger.enabled.info) logger.info('summary persisted', { today, aiScore, localScore, progressPercent, tokens: estTokens, durationMs: summaryRes.durationMs, chunksCount: summaryRes.chunksCount });
+    await pdb.setDayMetrics(today, { aiScore: offline ? null as any : aiScore, localScore, localScoreRaw, progressPercent }, { overwriteToday: true });
+    let estTokens: number | undefined = undefined;
+    if (!offline) {
+      estTokens = (typeof summaryRes.tokens === 'number' && summaryRes.tokens > 0)
+        ? summaryRes.tokens
+        : Math.max(1, Math.round((markdown?.length || 0) / 4));
+      await pdb.setDayAiMeta(today, {
+        aiModel: summaryRes.model || undefined,
+        aiProvider: summaryRes.provider || undefined,
+        aiTokens: estTokens,
+        aiDurationMs: typeof summaryRes.durationMs === 'number' ? summaryRes.durationMs : undefined,
+        chunksCount: typeof summaryRes.chunksCount === 'number' ? summaryRes.chunksCount : undefined,
+        lastGenAt,
+      });
+    } else {
+      await pdb.setDayAiMeta(today, { lastGenAt });
+    }
+    if (logger.enabled.info) logger.info('summary persisted', { today, aiScore: offline ? null : aiScore, localScore, progressPercent, tokens: estTokens, durationMs: summaryRes.durationMs, chunksCount: summaryRes.chunksCount });
     const record = { timestamp: Date.now(), score: aiScore, summary: markdown || '（无内容）' };
     await storage.append(record);
     // attach meta for return

@@ -12,13 +12,28 @@ contextBridge.exposeInMainWorld('api', {
   trackingStatus: () => ipcRenderer.invoke('tracking:status'),
   statsGetToday: () => ipcRenderer.invoke('stats:getToday'),
   statsGetRange: (payload: { startDate: string; endDate: string }) => ipcRenderer.invoke('stats:getRange', payload),
+  statsGetDay: (payload: { date: string }) => ipcRenderer.invoke('stats:getDay', payload),
+  // week/month stats
+  statsGetWeek: (payload: { week: string }) => ipcRenderer.invoke('stats:getWeek', payload),
+  statsGetMonth: (payload: { month: string }) => ipcRenderer.invoke('stats:getMonth', payload),
+  statsGetWeeksInMonth: (payload: { month: string }) => ipcRenderer.invoke('stats:getWeeksInMonth', payload),
+  statsGetWeekRange: (payload: { week: string }) => ipcRenderer.invoke('stats:getWeekRange', payload),
+  statsGetMonthsWithData: (payload?: { limit?: number }) => ipcRenderer.invoke('stats:getMonthsWithData', payload),
+  statsGetMonthsFromDays: (payload?: { limit?: number }) => ipcRenderer.invoke('stats:getMonthsFromDays', payload),
+  statsGetFirstDayDate: () => ipcRenderer.invoke('stats:getFirstDayDate'),
+  statsGetRepoFirstActiveMonth: () => ipcRenderer.invoke('stats:getRepoFirstActiveMonth'),
   statsGetTotals: () => ipcRenderer.invoke('stats:getTotals'),
-  statsGetTodayLive: () => ipcRenderer.invoke('stats:getTodayLive'),
+  // read-only live counts (no DB writes)
+  statsGetTodayLiveReadOnly: () => ipcRenderer.invoke('stats:getTodayLiveReadOnly'),
   statsGetTotalsLive: () => ipcRenderer.invoke('stats:getTotalsLive'),
   summaryGenerate: () => ipcRenderer.invoke('summary:generate'),
+  summaryGenerateWeek: (payload: { week: string }) => ipcRenderer.invoke('summary:generateWeek', payload),
+  summaryGenerateMonth: (payload: { month: string }) => ipcRenderer.invoke('summary:generateMonth', payload),
   trackingAnalyzeOnce: (payload: { repoPath?: string }) => ipcRenderer.invoke('tracking:analyzeOnce', payload),
   summaryTodayDiff: () => ipcRenderer.invoke('summary:todayDiff'),
   diffToday: () => ipcRenderer.invoke('diff:today'),
+  // repo auto-save (atomic, pauses tracker)
+  repoAutoSaveToday: (payload?: { summary?: string; aiScore?: number; localScore?: number; progressPercent?: number }) => ipcRenderer.invoke('repo:autoSaveToday', payload),
 
   // app data directory helpers
   userDataPath: () => ipcRenderer.invoke('app:userDataPath'),
@@ -50,6 +65,10 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_: unknown, payload: { id: string; progress: number; status: string }) => callback(payload);
     ipcRenderer.on('summary:job:progress', listener);
     return () => ipcRenderer.removeListener('summary:job:progress', listener);
+  },
+  onStatsRefreshOnce: (callback: () => void) => {
+    const listener = () => { callback(); ipcRenderer.removeListener('stats:refresh', listener); };
+    ipcRenderer.on('stats:refresh', listener);
   },
   onDbImportedOnce: (callback: (payload: { path: string }) => void) => {
     const listener = (_: unknown, payload: { path: string }) => { callback(payload); ipcRenderer.removeListener('db:imported', listener); };

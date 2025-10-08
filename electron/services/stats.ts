@@ -79,8 +79,8 @@ export class StatsService {
     const existingToday = await this.db.getDay(today);
     if (existingToday) await this.db.setDaySummary(today, toSave);
     else {
-      // ensure there's at least an empty row to attach summary
-      await this.db.upsertDayAccumulate(today, 0, 0);
+      // ensure there's at least an empty row to attach summary (use totals API)
+      await this.db.setDayCounts(today, 0, 0);
       await this.db.setDaySummary(today, toSave);
     }
 
@@ -104,12 +104,6 @@ export class StatsService {
     // Persist to DB for real-time baseScore/trend
     try {
       await this.db.setDayCounts(today, ns.insertions, ns.deletions);
-      try {
-        const row = await this.db.getDay(today);
-        if (row && (typeof row.aiScore === 'number' || typeof row.localScore === 'number')) {
-          await this.db.setDayMetrics(today, { aiScore: row.aiScore ?? undefined, localScore: row.localScore ?? undefined, progressPercent: row.progressPercent ?? undefined });
-        }
-      } catch {}
     } catch {}
     const total = Math.max(0, (ns.insertions || 0)) + Math.max(0, (ns.deletions || 0));
     const out = { date: today, insertions: ns.insertions, deletions: ns.deletions, total };

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Dashboard from '@/components/Dashboard';
 import Settings from '@/components/settings/SettingsIndex';
 import Repo from '@/components/Repo';
@@ -17,6 +19,18 @@ function App() {
   const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
   const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
+  // history view states
+  const [histTab, setHistTab] = useState<'day'|'week'|'month'>('day');
+  const [histRepoPath, setHistRepoPath] = useState<string>('');
+  const [histDbFile, setHistDbFile] = useState<string>('');
+  const [histItems, setHistItems] = useState<Array<{ date: string; baseScore: number; trend?: number; aiScore?: number|null; localScore?: number|null; lastGenAt?: number|null; summary?: string|null }>>([]);
+  const [histSelectedDate, setHistSelectedDate] = useState<string>('');
+  const [histSelected, setHistSelected] = useState<{ date: string; summary: string; aiScore?: number|null; localScore?: number|null; progressPercent?: number|null; aiModel?: string|null; aiProvider?: string|null; lastGenAt?: number|null } | null>(null);
+  const [histWeeks, setHistWeeks] = useState<string[]>([]);
+  const [histWeeksMonth, setHistWeeksMonth] = useState<string>('');
+  const [histSelectedWeek, setHistSelectedWeek] = useState<string>('');
+  const [histMonths, setHistMonths] = useState<string[]>([]);
+  const [histSelectedMonth, setHistSelectedMonth] = useState<string>('');
   // debounced hover control to make sidebar open/close smoother
   const openTimer = React.useRef<number | null>(null);
   const closeTimer = React.useRef<number | null>(null);
@@ -66,10 +80,107 @@ function App() {
       if (typeof d.quoteEnabled === 'boolean') setQuoteEnabled(d.quoteEnabled);
       if (typeof d.quoteRefreshSeconds === 'number' && d.quoteRefreshSeconds > 0) setQuoteRefreshSeconds(d.quoteRefreshSeconds);
       if (typeof d.quoteLetterSpacing === 'number') setQuoteLetterSpacing(d.quoteLetterSpacing);
+      // if repo changes, refresh history info lazily
+      if (typeof d.repoPath === 'string') {
+        loadHistoryPanel();
+      }
     };
     window.addEventListener('config:updated' as any, handler);
     return () => window.removeEventListener('config:updated' as any, handler);
   }, []);
+
+  // load history sidebar/panel data
+  const loadHistoryPanel = async () => {
+    try {
+      const cfg: any = await (window as any).api?.getConfig?.();
+      setHistRepoPath(cfg?.repoPath || '');
+    } catch {}
+    try {
+      const f = await (window as any).api?.dbCurrentFile?.();
+      setHistDbFile(f || '');
+    } catch {}
+    // last 60 days, filter days with summary or lastGenAt
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 59);
+      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const rows: any[] = await (window as any).api?.statsGetRange?.({ startDate: toKey(start), endDate: toKey(end) });
+      const items = (rows || [])
+        .filter(r => (r?.summary && String(r.summary).trim()) || typeof (r as any)?.lastGenAt === 'number')
+        .map(r => ({
+          date: r.date,
+          baseScore: r.baseScore,
+          trend: (r as any).trend,
+          aiScore: (r as any).aiScore ?? null,
+          localScore: (r as any).localScore ?? null,
+          lastGenAt: (r as any).lastGenAt ?? null,
+          summary: r.summary ?? null,
+        }))
+        .sort((a,b) => b.date.localeCompare(a.date));
+      setHistItems(items);
+      if (items.length > 0 && !histSelectedDate) {
+        const first = items[0]!;
+        setHistSelectedDate(first.date);
+        // preload first
+        try {
+          if ((window as any).api?.statsGetDay) {
+            const d = await (window as any).api.statsGetDay({ date: first.date });
+            setHistSelected({ date: first.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null });
+          } else {
+            setHistSelected({ date: first.date, summary: String(first.summary||'') });
+          }
+        } catch{}
+      }
+    } catch {}
+    // weeks for current month
+    try {
+      const now = new Date();
+      const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      setHistWeeksMonth(monthKey);
+      const ws: string[] = await (window as any).api?.statsGetWeeksInMonth?.({ month: monthKey });
+      setHistWeeks(Array.isArray(ws) ? ws : []);
+    } catch {}
+    // months list: prefer months from days table; then months with summaries; fallback trimmed by firstDay
+    try {
+      let list: string[] = [];
+      try {
+        const mdays: string[] = await (window as any).api?.statsGetMonthsFromDays?.({ limit: 36 });
+        if (Array.isArray(mdays) && mdays.length) list = mdays;
+      } catch {}
+      if (!list.length) {
+        try {
+          const ms: string[] = await (window as any).api?.statsGetMonthsWithData?.({ limit: 36 });
+          if (Array.isArray(ms) && ms.length) list = ms;
+        } catch {}
+      }
+      if (!list.length) {
+        const now = new Date();
+        // Trim by first day in DB if available
+        let first: string | null = null;
+        try { first = await (window as any).api?.statsGetFirstDayDate?.(); } catch {}
+        const firstMonth = first ? first.slice(0,7) : null;
+        for (let i=0;i<12;i++) {
+          const d = new Date(now); d.setMonth(now.getMonth()-i);
+          const mk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          if (firstMonth && mk < firstMonth) break;
+          list.push(mk);
+        }
+      }
+      // Apply repo first active month trimming if available
+      try {
+        const fam: string | null = await (window as any).api?.statsGetRepoFirstActiveMonth?.();
+        if (fam && typeof fam === 'string') {
+          list = (list || []).filter(mk => mk >= fam);
+        }
+      } catch {}
+      setHistMonths(list);
+      if (!histSelectedMonth && list.length) setHistSelectedMonth(list[0]!);
+    } catch {}
+  };
+
+  // when switching to History tab, load data
+  useEffect(() => { if (tab === 'history') { loadHistoryPanel(); } }, [tab]);
 
   // fetch a short quote with timeouts and robust fallbacks
   const fetchWithTimeout = async (input: RequestInfo | URL, init?: RequestInit, ms = 4000) => {
@@ -289,8 +400,135 @@ function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'repo' && <Repo />}
           {tab === 'history' && (
-            <div className="bg-slate-800 rounded p-4 border border-slate-700">
-              <div className="text-slate-300">历史图表已移动到仪表盘中。</div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-[calc(100vh-6rem)]">
+              {/* top info bar */}
+              <section className="lg:col-span-3 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden">
+                <div className="px-4 py-3 text-sm text-slate-300 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div className="truncate"><span className="text-slate-400">当前仓库：</span><span className="text-slate-200 break-all">{histRepoPath || '—'}</span></div>
+                  <div className="truncate"><span className="text-slate-400">数据库：</span><span className="text-slate-200 break-all">{histDbFile || '—'}</span></div>
+                </div>
+              </section>
+              {/* left list */}
+              <section className="lg:col-span-1 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
+                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-100">历史摘要</h3>
+                  <div className="ml-auto flex items-center gap-1">
+                    <button onClick={()=>setHistTab('day')} className={`text-xs px-2 py-1 rounded ${histTab==='day'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>日</button>
+                    <button onClick={()=>setHistTab('week')} className={`text-xs px-2 py-1 rounded ${histTab==='week'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>周</button>
+                    <button onClick={()=>setHistTab('month')} className={`text-xs px-2 py-1 rounded ${histTab==='month'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>月</button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-auto px-3 py-2 space-y-1">
+                  {histTab==='day' && (
+                    <>
+                      {histItems.length === 0 && <div className="text-xs text-slate-400">最近暂无生成的摘要</div>}
+                      {histItems.map(item => (
+                        <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-3 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm text-slate-100">{item.date}</div>
+                            <div className="text-[11px] text-slate-400">基 {item.baseScore}{typeof item.trend==='number' ? ` (${item.trend>=0?'+':''}${item.trend})` : ''}</div>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">AI {(item.aiScore??'—')} · 本地 {(item.localScore??'—')} {item.lastGenAt ? `· ${new Date(Number(item.lastGenAt)).toLocaleString()}` : ''}</div>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {histTab==='week' && (
+                    <>
+                      {histWeeks.length === 0 && <div className="text-xs text-slate-400">{histWeeksMonth} 暂无周总结</div>}
+                      {histWeeks.map(wk => (
+                        <div key={wk} className={`w-full text-left px-3 py-2 rounded border ${histSelectedWeek===wk ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <button onClick={async()=>{ setHistSelectedWeek(wk); try { const d = await (window as any).api?.statsGetWeek?.({ week: wk }); setHistSelected({ date: wk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-sm text-slate-100">{wk}</button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={async()=>{ try { await (window as any).api?.summaryGenerateWeek?.({ week: wk }); const d = await (window as any).api?.statsGetWeek?.({ week: wk }); if (histSelectedWeek===wk) setHistSelected({ date: wk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-[11px] px-2 py-0.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">生成</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {histTab==='month' && (
+                    <>
+                      {histMonths.map(mk => (
+                        <div key={mk} className={`w-full text-left px-3 py-2 rounded border ${histSelectedMonth===mk ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <button onClick={async()=>{ setHistSelectedMonth(mk); try { const d = await (window as any).api?.statsGetMonth?.({ month: mk }); setHistSelected({ date: mk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-sm text-slate-100">{mk}</button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={async()=>{ try { await (window as any).api?.summaryGenerateMonth?.({ month: mk }); const d = await (window as any).api?.statsGetMonth?.({ month: mk }); if (histSelectedMonth===mk) setHistSelected({ date: mk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-[11px] px-2 py-0.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">生成</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </section>
+              {/* right preview */}
+              <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
+                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur">
+                  <h3 className="text-sm font-semibold text-slate-100">{histSelected?.date || (histTab==='day'?'选择一个日期': (histTab==='week'?'选择一个周键':'选择一个月份'))}</h3>
+                </div>
+                <div className="flex-1 overflow-auto p-4">
+                  {histSelected ? (
+                    <div className="prose prose-invert max-w-none text-slate-200">
+                      <div className="text-xs text-slate-400 mb-2">
+                        {(histSelected.lastGenAt ? `上次: ${new Date(Number(histSelected.lastGenAt)).toLocaleString()} · ` : '')}
+                        {(typeof histSelected.progressPercent==='number') ? `进度: ${histSelected.progressPercent}% · ` : ''}
+                        {(typeof histSelected.aiScore==='number') ? `AI: ${histSelected.aiScore} · ` : ''}
+                        {(typeof histSelected.localScore==='number') ? `本地: ${histSelected.localScore}` : ''}
+                      </div>
+                      {(() => {
+                        let mdSource = String(histSelected.summary || '');
+                        const raw = mdSource;
+                        if (/^\s*\{[\s\S]*\}\s*$/.test(raw)) {
+                          try {
+                            const obj = JSON.parse(raw);
+                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                            if (typeof md === 'string' && md.trim()) {
+                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                              mdSource = md;
+                            }
+                          } catch {}
+                        }
+                        if (mdSource.includes('```')) {
+                          const fenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
+                          mdSource = mdSource.replace(fenceRe, (_m, inner) => {
+                            try {
+                              const obj = JSON.parse(String(inner));
+                              let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                              if (typeof md === 'string' && md.trim()) {
+                                md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                return md;
+                              }
+                            } catch {}
+                            return _m;
+                          });
+                          const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
+                          mdSource = mdSource.replace(inlineFenceRe, (_m, inner) => {
+                            try {
+                              const obj = JSON.parse(String(inner));
+                              let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                              if (typeof md === 'string' && md.trim()) {
+                                md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                return md;
+                              }
+                            } catch {}
+                            return _m;
+                          });
+                        }
+                        return (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {mdSource || '（无内容）'}
+                          </ReactMarkdown>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="text-slate-400">请选择左侧日期以查看当日总结</div>
+                  )}
+                </div>
+              </section>
             </div>
           )}
           {tab === 'settings' && <Settings />}

@@ -15,7 +15,8 @@ const Repo: React.FC = () => {
   const [dbFile, setDbFile] = useState('');
   const [status, setStatus] = useState<TrackerStatus>({ running: false });
   const [busy, setBusy] = useState(false);
-  const [intervalMs, setIntervalMs] = useState<number>(30000);
+  // 轮询间隔（秒）
+  const [intervalSec, setIntervalSec] = useState<number>(30);
   const baseName = (p: string) => {
     if (!p) return '';
     const s = String(p).replace(/[\\/]+$/, '');
@@ -83,7 +84,8 @@ const Repo: React.FC = () => {
   const startTracking = async () => {
     setBusy(true);
     try {
-      await (window as any).api?.trackingStart?.({ repoPath, intervalMs: Math.max(2000, intervalMs) });
+      const ms = Math.max(5, Number(intervalSec) || 5) * 1000;
+      await (window as any).api?.trackingStart?.({ repoPath, intervalMs: ms });
       const st = await (window as any).api?.trackingStatus?.();
       if (st) setStatus(st);
     } catch {}
@@ -135,18 +137,20 @@ const Repo: React.FC = () => {
           </div>
         </div>
         {/* path input row */}
-        <div className="mt-3 flex gap-2">
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
           <input
             value={repoPath}
             onChange={e=>setRepoPath(e.target.value)}
-            className="flex-1 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
+            className="md:col-span-2 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none focus:ring-2 focus:ring-indigo-500/50"
             placeholder="d:/code/project"
           />
-          <button onClick={selectFolder} className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors flex items-center gap-1">
+          <div className="flex gap-2">
+          <button onClick={selectFolder} className="flex-1 px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-100 transition-colors flex items-center gap-1 justify-center">
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 6h6l2 2h10v10H3z"/></svg>
             选择
           </button>
-          <button onClick={async()=>{ try { await (window as any).api?.setConfig?.({ repoPath }); try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { repoPath } })); } catch {} } catch{}; refresh(); }} className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 transition-colors">保存</button>
+          <button onClick={async()=>{ try { await (window as any).api?.setConfig?.({ repoPath }); try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { repoPath } })); } catch {} } catch{}; refresh(); }} className="flex-1 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 transition-colors">保存</button>
+          </div>
         </div>
         {repoPath && (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -169,31 +173,52 @@ const Repo: React.FC = () => {
         <div className="md:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
           <header className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-100">快速操作</h3>
-            <span className="text-xs text-slate-400">跟踪与总结</span>
-          </header>
-          <div className="flex flex-wrap gap-2 items-center">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">轮询(ms)</span>
-              <input type="number" min={2000} step={1000} value={intervalMs} onChange={e=>setIntervalMs(parseInt(e.target.value)||2000)} className="w-24 bg-slate-900/60 border border-slate-700 rounded-md p-2 outline-none" />
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <span>轮询(秒)</span>
+              <input type="number" min={5} step={1} value={intervalSec} onChange={e=>setIntervalSec(Math.max(1, parseInt(e.target.value)||10))} className="w-20 bg-slate-900/60 border border-slate-700 rounded-md p-1.5 outline-none text-slate-200" />
             </div>
-            <button disabled={busy || !repoPath} onClick={startTracking} className="px-3 py-2 rounded-md bg-emerald-600/90 hover:bg-emerald-600 text-white border border-emerald-500/60 transition-colors disabled:opacity-50 flex items-center gap-1">
+          </header>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            <button disabled={busy || !repoPath} onClick={startTracking} className="px-3 py-2 rounded-md bg-emerald-600/90 hover:bg-emerald-600 text-white border border-emerald-500/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
               开始跟踪
             </button>
-            <button disabled={busy} onClick={stopTracking} className="px-3 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white border border-slate-500/60 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <button disabled={busy} onClick={stopTracking} className="px-3 py-2 rounded-md bg-slate-600 hover:bg-slate-500 text-white border border-slate-500/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 6h12v12H6z"/></svg>
               停止
             </button>
-            <button disabled={busy || !repoPath} onClick={analyzeOnce} className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <button disabled={busy || !repoPath} onClick={analyzeOnce} className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4h16v4H4zM4 12h10v8H4z"/></svg>
               立即分析
             </button>
-            <button disabled={busy} onClick={runSummary} className="px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-500/60 transition-colors disabled:opacity-50 flex items-center gap-1">
+            <button disabled={busy} onClick={runSummary} className="px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-500 text-white border border-fuchsia-500/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-1">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h10M4 18h8"/></svg>
               生成今日总结
             </button>
-            <span className="text-xs text-slate-400">状态：{status?.running ? '运行中' : '已停止'}</span>
+            <button
+              disabled={busy || !repoPath}
+              onClick={async()=>{
+                setBusy(true);
+                try {
+                  const res = await (window as any).api?.repoAutoSaveToday?.();
+                  if (res?.ok) {
+                    showToast('已自动保存今日数据','success');
+                    try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { forceReload: true } })); } catch {}
+                  } else if (res && res.ok === false) {
+                    showToast(`自动保存失败：${res?.error||'未知错误'}`,'error', 3200);
+                  }
+                } catch(e:any) {
+                  showToast(`自动保存失败：${e?.message||String(e)}`,'error',3200);
+                }
+                setBusy(false);
+              }}
+              className="px-3 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white border border-amber-500/60 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4h16v16H4z"/><path d="M8 4v6h8V4"/></svg>
+              自动保存
+            </button>
           </div>
+          <div className="mt-2 text-xs text-slate-400">状态：{status?.running ? '运行中' : '已停止'}</div>
         </div>
         <div className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg flex flex-col gap-2">
           <div className="text-sm font-semibold text-slate-100">数据库</div>
