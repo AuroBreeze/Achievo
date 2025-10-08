@@ -126,8 +126,8 @@ ipcMain.handle('db:export', async () => {
       filters: [{ name: 'SQLite(js) DB', extensions: ['sqljs'] }, { name: 'All Files', extensions: ['*'] }],
     });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
-    // Narrow and normalize to plain string for Node typings
-    const dst: string = String(res.filePath);
+    // After the guard above, filePath is non-null
+    const dst = res.filePath!;
     fs.copyFileSync(src, dst);
     return { ok: true, path: dst };
   } catch (e:any) {
