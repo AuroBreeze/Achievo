@@ -71,13 +71,14 @@ export class TrackerService {
 
       const num = await git.getDiffNumstat(this.lastProcessedCommit, head);
       if (this.logger.enabled.debug) this.logger.debug('tick:numstat', num);
-      // accumulate to today's record
+      // merge today's totals using maxima semantics to avoid double counting
       const today = new Date().toISOString().slice(0, 10);
-      await this.db.upsertDayAccumulate(today, num.insertions, num.deletions);
-      if (this.logger.enabled.debug) this.logger.debug('tick:db:upsertDayAccumulate', { today, ...num });
-      // recompute aggregates for week/month/year
-      await this.db.updateAggregatesForDate(today);
-      if (this.logger.enabled.debug) this.logger.debug('tick:db:updateAggregatesForDate', { today });
+      await (this.db as any).applyTodayUpdate?.(today, {
+        counts: { insertions: Math.max(0, num.insertions||0), deletions: Math.max(0, num.deletions||0) },
+        mergeByMax: true,
+        overwriteToday: false,
+      });
+      if (this.logger.enabled.debug) this.logger.debug('tick:db:applyTodayUpdate', { today, ...num });
 
       this.lastProcessedCommit = head;
       const cfg2 = await getConfig();

@@ -193,24 +193,14 @@ const Dashboard: React.FC = () => {
     const rseq = ++refreshSeqRef.current;
     if (!window.api) return;
     try {
-      // fetch in parallel
       const end = new Date();
       const start = new Date();
       start.setDate(end.getDate() - 29);
       const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      const [live, t, totalsLive, totalsDb, range] = await Promise.allSettled([
-        window.api.statsGetTodayLive(),
-        window.api.statsGetToday(),
-        window.api.statsGetTotalsLive(),
-        window.api.statsGetTotals(),
-        window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) }),
-      ]);
-      if (rseq !== refreshSeqRef.current) return;
-      // apply todayLive
-      if (live.status === 'fulfilled') setTodayLive(live.value);
-      // apply today row
-      if (t.status === 'fulfilled' && t.value) {
-        const tv = t.value as any;
+      // 1) 优先获取并应用今日行，确保摘要/基础分/趋势先稳定渲染
+      try {
+        const tv: any = await window.api.statsGetToday();
+        if (rseq !== refreshSeqRef.current) return;
         setToday(tv);
         const dbSummary = typeof tv?.summary === 'string' ? String(tv.summary).trim() : '';
         if (dbSummary) setTodayText(dbSummary);
@@ -223,11 +213,18 @@ const Dashboard: React.FC = () => {
         setAiProvider(tv?.aiProvider ?? null);
         setAiTokens(typeof tv?.aiTokens === 'number' ? tv.aiTokens : null);
         setAiDurationMs(typeof tv?.aiDurationMs === 'number' ? tv.aiDurationMs : null);
-      }
-      // apply totals (prefer live if available)
-      if (totalsLive.status === 'fulfilled' && totalsLive.value) setTotals(totalsLive.value);
-      else if (totalsDb.status === 'fulfilled' && totalsDb.value) setTotals(totalsDb.value);
-      // apply daily range
+      } catch {}
+      // 2) 再并行其余读取，按需应用
+      const [live, totalsLive, totalsDb, range] = await Promise.allSettled([
+        (window.api as any).statsGetTodayLiveReadOnly?.(),
+        window.api.statsGetTotalsLive(),
+        window.api.statsGetTotals(),
+        window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) }),
+      ]);
+      if (rseq !== refreshSeqRef.current) return;
+      if (live.status === 'fulfilled') setTodayLive(live.value as any);
+      if (totalsLive.status === 'fulfilled' && totalsLive.value) setTotals(totalsLive.value as any);
+      else if (totalsDb.status === 'fulfilled' && totalsDb.value) setTotals(totalsDb.value as any);
       if (range.status === 'fulfilled' && Array.isArray(range.value)) {
         type RowIn = { date: string; baseScore: number; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null };
         const mapped = ((range.value || []) as RowIn[])
@@ -307,7 +304,7 @@ const Dashboard: React.FC = () => {
     const seq = ++seqLiveRef.current;
     if (!window.api) return;
     try {
-      const r = await window.api.statsGetTodayLive();
+      const r = await (window.api as any).statsGetTodayLiveReadOnly?.();
       if (seq !== seqLiveRef.current) return;
       setTodayLive(r);
     } catch {}
@@ -409,12 +406,15 @@ const Dashboard: React.FC = () => {
   }, [loadDailyRange, refreshAll]);
 
   React.useEffect(() => {
-    const ms = Math.max(1000, (pollSeconds || 10) * 1000);
+    // 忙碌时降低轮询频率：翻倍且不小于 20s
+    const base = Math.max(1, (pollSeconds || 10));
+    const eff = todayBusy ? Math.max(20, base * 2) : base;
+    const ms = Math.max(1000, eff * 1000);
     const id = setInterval(async () => {
       await refreshAll();
     }, ms);
     return () => clearInterval(id);
-  }, [pollSeconds, loadDailyRange, refreshAll]);
+  }, [pollSeconds, todayBusy, refreshAll]);
 
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
@@ -477,6 +477,19 @@ const Dashboard: React.FC = () => {
     })();
     return () => { try { off && off(); } catch {} };
   }, [loadDailyRange]);
+
+  // When a summary completes, main will emit 'stats:refresh' once; listen and refresh dashboard.
+  // Also, re-register a one-shot listener whenever we enter busy state.
+  React.useEffect(() => {
+    if ((window as any).api?.onStatsRefreshOnce) {
+      (window as any).api.onStatsRefreshOnce(async () => { await refreshAll(); });
+    }
+  }, []);
+  React.useEffect(() => {
+    if (todayBusy && (window as any).api?.onStatsRefreshOnce) {
+      (window as any).api.onStatsRefreshOnce(async () => { await refreshAll(); });
+    }
+  }, [todayBusy, refreshAll]);
 
   // derive trend from daily array when API trend is missing or stale
   React.useEffect(() => {

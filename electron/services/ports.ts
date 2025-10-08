@@ -8,11 +8,19 @@ export type DBPort = {
   getYesterday: (date: string) => string | null;
   getDay: (date: string) => Promise<DayRow | null>;
   getDaysRange: (start: string, end: string) => Promise<DayRow[]>;
-  upsertDayAccumulate: (date: string, ins: number, del: number) => Promise<DayRow>;
+  setDayCounts: (date: string, insertions: number, deletions: number) => Promise<void>;
   setDaySummary: (date: string, summary: string) => Promise<void>;
   updateAggregatesForDate: (date: string) => Promise<void>;
   setDayMetrics: (date: string, metrics: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) => Promise<void>;
   setDayAiMeta: (date: string, meta: { aiModel?: string; aiProvider?: string; aiTokens?: number; aiDurationMs?: number; chunksCount?: number; lastGenAt?: number }) => Promise<void>;
+  applyTodayUpdate: (date: string, opts: {
+    counts?: { insertions: number; deletions: number };
+    metrics?: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null };
+    summary?: string | null;
+    aiMeta?: { aiModel?: string | null; aiProvider?: string | null; aiTokens?: number | null; aiDurationMs?: number | null; chunksCount?: number | null; lastGenAt?: number | null };
+    overwriteToday?: boolean;
+    mergeByMax?: boolean;
+  }) => Promise<void>;
 };
 
 export type GitPort = {
@@ -43,11 +51,19 @@ class SqljsDbAdapter implements DBPort {
   getYesterday(date: string) { return this.inner.getYesterday(date); }
   getDay(date: string) { return this.inner.getDay(date); }
   getDaysRange(start: string, end: string) { return this.inner.getDaysRange(start, end); }
-  upsertDayAccumulate(date: string, ins: number, del: number) { return this.inner.upsertDayAccumulate(date, ins, del); }
+  setDayCounts(date: string, insertions: number, deletions: number) { return this.inner.setDayCounts(date, insertions, deletions); }
   setDaySummary(date: string, summary: string) { return this.inner.setDaySummary(date, summary); }
   updateAggregatesForDate(date: string) { return this.inner.updateAggregatesForDate(date); }
   setDayMetrics(date: string, metrics: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null }, opts?: { overwriteToday?: boolean }) { return this.inner.setDayMetrics(date, metrics, opts); }
   setDayAiMeta(date: string, meta: { aiModel?: string; aiProvider?: string; aiTokens?: number; aiDurationMs?: number; chunksCount?: number; lastGenAt?: number }) { return this.inner.setDayAiMeta(date, meta); }
+  applyTodayUpdate(date: string, opts: {
+    counts?: { insertions: number; deletions: number };
+    metrics?: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null };
+    summary?: string | null;
+    aiMeta?: { aiModel?: string | null; aiProvider?: string | null; aiTokens?: number | null; aiDurationMs?: number | null; chunksCount?: number | null; lastGenAt?: number | null };
+    overwriteToday?: boolean;
+    mergeByMax?: boolean;
+  }) { return (this.inner as any).applyTodayUpdate(date, opts); }
 }
 
 class GitAdapter implements GitPort {

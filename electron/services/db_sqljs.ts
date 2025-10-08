@@ -41,6 +41,8 @@ export class DB {
   private filePath: string;
   private ready: Promise<void>;
   private logger = getLogger('db');
+  // 序列化持久化，避免并发写入交错覆盖
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(opts?: { repoPath?: string; name?: string }) {
     // Resolve install root: exe directory in packaged app; project cwd in dev
@@ -79,6 +81,130 @@ export class DB {
     const chunks = (typeof meta.chunksCount === 'number') ? meta.chunksCount : (row.chunksCount ?? null);
     const genAt = (typeof meta.lastGenAt === 'number') ? meta.lastGenAt : (row.lastGenAt ?? null);
     this.db.run(`UPDATE days SET aiModel=?, aiProvider=?, aiTokens=?, aiDurationMs=?, chunksCount=?, lastGenAt=?, updatedAt=? WHERE date=?`, [model, provider, tokens, dur, chunks, genAt, now, date]);
+    await this.persist();
+  }
+
+  // Transaction-like batched update for a single date. Applies counts, metrics, summary, and AI meta,
+  // then updates aggregates, and finally persists ONCE to minimize race windows.
+  async applyTodayUpdate(date: string, opts: {
+    counts?: { insertions: number; deletions: number }; // totals since date, not deltas
+    metrics?: { aiScore?: number | null; localScore?: number | null; localScoreRaw?: number | null; progressPercent?: number | null };
+    summary?: string | null;
+    aiMeta?: { aiModel?: string | null; aiProvider?: string | null; aiTokens?: number | null; aiDurationMs?: number | null; chunksCount?: number | null; lastGenAt?: number | null };
+    overwriteToday?: boolean; // recompute base/trend from prevBase
+    mergeByMax?: boolean; // when true, take maxima when merging counts/metrics
+  }) {
+    await this.ready;
+    const now = Date.now();
+    const existing = await this.getDay(date);
+    const yKey = this.getYesterday(date);
+    const y = yKey ? await this.getDay(yKey) : null;
+    const prevBase = Math.max(100, y?.baseScore || 100);
+
+    // 1) Determine counts to apply (totals semantics)
+    let ins = existing?.insertions || 0;
+    let del = existing?.deletions || 0;
+    if (opts.counts) {
+      const tin = Math.max(0, Math.round(opts.counts.insertions || 0));
+      const tdel = Math.max(0, Math.round(opts.counts.deletions || 0));
+      if (existing) {
+        if (opts.mergeByMax) { ins = Math.max(ins, tin); del = Math.max(del, tdel); }
+        else { ins = tin; del = tdel; }
+      } else {
+        ins = tin; del = tdel;
+      }
+    }
+
+    // 2) Decide baseScore/trend/progressPercent
+    let aiScore = (existing?.aiScore ?? null) as number | null;
+    let localScore = (existing?.localScore ?? null) as number | null;
+    let localScoreRaw = (existing?.localScoreRaw ?? null) as number | null;
+    let progressPercent = (existing?.progressPercent ?? null) as number | null;
+    if (opts.metrics) {
+      const m = opts.metrics;
+      const mAi = (typeof m.aiScore === 'number') ? m.aiScore : aiScore;
+      const mLocal = (typeof m.localScore === 'number') ? m.localScore : localScore;
+      const mRaw = (typeof m.localScoreRaw === 'number') ? m.localScoreRaw : localScoreRaw;
+      const mProg = (typeof m.progressPercent === 'number') ? m.progressPercent : progressPercent;
+      if (opts.mergeByMax) {
+        aiScore = (aiScore === null) ? (typeof mAi === 'number' ? mAi : null) : Math.max(aiScore, (typeof mAi === 'number' ? mAi : aiScore));
+        localScore = (localScore === null) ? (typeof mLocal === 'number' ? mLocal : null) : Math.max(localScore, (typeof mLocal === 'number' ? mLocal : localScore));
+        progressPercent = (progressPercent === null) ? (typeof mProg === 'number' ? mProg : null) : Math.max(progressPercent, (typeof mProg === 'number' ? mProg : progressPercent));
+        localScoreRaw = (typeof mRaw === 'number') ? mRaw : localScoreRaw;
+      } else {
+        aiScore = (typeof mAi === 'number') ? mAi : aiScore;
+        localScore = (typeof mLocal === 'number') ? mLocal : localScore;
+        progressPercent = (typeof mProg === 'number') ? mProg : progressPercent;
+        localScoreRaw = (typeof mRaw === 'number') ? mRaw : localScoreRaw;
+      }
+    }
+
+    const cfg = await getConfig();
+    const ratio = Number.isFinite(cfg.dailyCapRatio as any) ? Math.max(0, Math.min(1, (cfg.dailyCapRatio as number))) : DEFAULT_DAILY_CAP_RATIO;
+    const hasChanges = (ins + del) > 0;
+
+    // Compute base/trend according to overwriteToday & lastGenAt rules
+    let baseScore = existing ? Math.max(100, existing.baseScore || 0) : 100;
+    let trend = existing ? (existing.trend || 0) : 0;
+    const lastGen = existing?.lastGenAt ?? null;
+    if (!existing) {
+      const res = computeBaseUpdate({ prevBase, currentBase: prevBase, insertions: ins, deletions: del, aiScore: 0, localScore: 0, cfg: { dailyCapRatio: ratio } });
+      baseScore = res.nextBase;
+      trend = y ? Math.round(baseScore - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
+      if (progressPercent === null || typeof progressPercent !== 'number') {
+        progressPercent = calcProgressPercentComplex({ trend, prevBase, localScore: 0, aiScore: 0, totalChanges: ins + del, hasChanges, cap: 25 });
+      }
+    } else if (lastGen && !opts.overwriteToday) {
+      // keep base after summary; recompute trend only
+      baseScore = Math.max(100, existing.baseScore || 0);
+      trend = Math.round(baseScore - prevBase);
+      // keep existing progressPercent stable unless explicitly provided
+    } else {
+      const currentBase = Math.max(prevBase, Math.max(100, existing.baseScore || 0));
+      const res = computeBaseUpdate({ prevBase, currentBase, insertions: ins, deletions: del, aiScore: Math.max(0, aiScore ?? 0), localScore: Math.max(0, localScore ?? 0), cfg: { dailyCapRatio: ratio } });
+      const nextBase = Math.max(currentBase, res.nextBase);
+      baseScore = nextBase;
+      trend = y ? Math.round(nextBase - (y.baseScore || 0)) : (res.debug?.incApplied ?? 0);
+      if (progressPercent === null || typeof progressPercent !== 'number') {
+        progressPercent = calcProgressPercentComplex({ trend, prevBase, localScore: Math.max(0, localScore ?? 0), aiScore: Math.max(0, aiScore ?? 0), totalChanges: ins + del, hasChanges, cap: 25 });
+      }
+    }
+
+    // 3) Upsert row with consolidated values
+    if (!existing) {
+      this.db.run(`INSERT INTO days(date, insertions, deletions, baseScore, trend, progressPercent, summary, aiScore, localScore, localScoreRaw, aiModel, aiProvider, aiTokens, aiDurationMs, chunksCount, lastGenAt, createdAt, updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+        date, ins, del, baseScore, trend, (progressPercent ?? null), (opts.summary ?? null), (aiScore ?? null), (localScore ?? null), (localScoreRaw ?? null), (opts.aiMeta?.aiModel ?? null), (opts.aiMeta?.aiProvider ?? null), (opts.aiMeta?.aiTokens ?? null), (opts.aiMeta?.aiDurationMs ?? null), (opts.aiMeta?.chunksCount ?? null), (opts.aiMeta?.lastGenAt ?? null), now, now,
+      ]);
+    } else {
+      // build UPDATE dynamically
+      const cols: string[] = [];
+      const vals: any[] = [];
+      cols.push('insertions=?'); vals.push(ins);
+      cols.push('deletions=?'); vals.push(del);
+      cols.push('updatedAt=?'); vals.push(now);
+      if (typeof baseScore === 'number') { cols.push('baseScore=?'); vals.push(Math.round(baseScore)); }
+      if (typeof trend === 'number') { cols.push('trend=?'); vals.push(Math.round(trend)); }
+      if (opts.summary !== undefined) { cols.push('summary=?'); vals.push(opts.summary ?? null); }
+      if (aiScore !== undefined) { cols.push('aiScore=?'); vals.push(aiScore ?? null); }
+      if (localScore !== undefined) { cols.push('localScore=?'); vals.push(localScore ?? null); }
+      if (localScoreRaw !== undefined) { cols.push('localScoreRaw=?'); vals.push(localScoreRaw ?? null); }
+      if (progressPercent !== undefined) { cols.push('progressPercent=?'); vals.push(progressPercent ?? null); }
+      if (opts.aiMeta) {
+        const m = opts.aiMeta;
+        if ('aiModel' in m) { cols.push('aiModel=?'); vals.push(m.aiModel ?? null); }
+        if ('aiProvider' in m) { cols.push('aiProvider=?'); vals.push(m.aiProvider ?? null); }
+        if ('aiTokens' in m) { cols.push('aiTokens=?'); vals.push(m.aiTokens ?? null); }
+        if ('aiDurationMs' in m) { cols.push('aiDurationMs=?'); vals.push(m.aiDurationMs ?? null); }
+        if ('chunksCount' in m) { cols.push('chunksCount=?'); vals.push(m.chunksCount ?? null); }
+        if ('lastGenAt' in m) { cols.push('lastGenAt=?'); vals.push(m.lastGenAt ?? null); }
+      }
+      cols.push('date=?'); vals.push(date);
+      this.db.run(`UPDATE days SET ${cols.join(', ')} WHERE date=?`, vals);
+    }
+
+    // 4) Aggregates once at end
+    await this.updateAggregatesForDate(date);
+    // 5) Single persist (updateAggregates already persists, but call persist again to ensure durability in queue)
     await this.persist();
   }
 
@@ -121,23 +247,14 @@ export class DB {
         [date, ins, del, nextBase, trend, progressPercent, null, now, now]);
     } else {
       // If today's summary has been generated (lastGenAt present), do NOT mutate baseScore here.
-      // Summary becomes authoritative for today's base/trend.
+      // Summary becomes authoritative for today's base/trend/progressPercent.
       if (typeof exists.lastGenAt === 'number') {
         const keepBase = Math.max(100, exists.baseScore || 0);
         const prevBase = Math.max(100, yesterday?.baseScore || 100);
         const trend = Math.round(keepBase - prevBase);
-        const hasChanges = (ins + del) > 0;
-        const progressPercent = calcProgressPercentComplex({
-          trend,
-          prevBase,
-          localScore: Math.max(0, exists.localScore ?? 0),
-          aiScore: Math.max(0, exists.aiScore ?? 0),
-          totalChanges: ins + del,
-          hasChanges,
-          cap: 25,
-        });
-        this.db.run(`UPDATE days SET insertions=?, deletions=?, trend=?, progressPercent=?, updatedAt=? WHERE date=?`,
-          [ins, del, trend, progressPercent, now, date]);
+        // 保持 progressPercent 不变，避免已生成摘要后的 UI 百分比抖动
+        this.db.run(`UPDATE days SET insertions=?, deletions=?, trend=?, updatedAt=? WHERE date=?`,
+          [ins, del, trend, now, date]);
       } else {
         const currentBase = Math.max(prevBase, Math.max(100, exists.baseScore || 0));
         const res = computeBaseUpdate({
@@ -308,8 +425,12 @@ export class DB {
   }
 
   private async persist() {
-    const data = this.db.export();
-    await fs.writeFile(this.filePath, Buffer.from(data));
+    // 将 export+write 放入队列中执行，确保顺序且使用队列执行时的最新快照
+    this.persistQueue = this.persistQueue.then(async () => {
+      const data = this.db.export();
+      await fs.writeFile(this.filePath, Buffer.from(data));
+    }).catch(() => { /* ignore persist error to keep队列不中断 */ });
+    return this.persistQueue;
   }
 
   // computeCumulativeBase removed; base progression is handled by baseScoreEngine.computeBaseUpdate

@@ -192,6 +192,28 @@ const Repo: React.FC = () => {
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h10M4 18h8"/></svg>
               生成今日总结
             </button>
+            <button
+              disabled={busy || !repoPath}
+              onClick={async()=>{
+                setBusy(true);
+                try {
+                  const res = await (window as any).api?.repoAutoSaveToday?.();
+                  if (res?.ok) {
+                    showToast('已自动保存今日数据','success');
+                    try { window.dispatchEvent(new CustomEvent('config:updated', { detail: { forceReload: true } })); } catch {}
+                  } else if (res && res.ok === false) {
+                    showToast(`自动保存失败：${res?.error||'未知错误'}`,'error', 3200);
+                  }
+                } catch(e:any) {
+                  showToast(`自动保存失败：${e?.message||String(e)}`,'error',3200);
+                }
+                setBusy(false);
+              }}
+              className="px-3 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white border border-amber-500/60 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 4h16v16H4z"/><path d="M8 4v6h8V4"/></svg>
+              自动保存
+            </button>
             <span className="text-xs text-slate-400">状态：{status?.running ? '运行中' : '已停止'}</span>
           </div>
         </div>

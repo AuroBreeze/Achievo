@@ -105,6 +105,14 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Numstat for counts & context
   const ns = await git.getNumstatSinceDate(today);
 
+  // 在摘要流程早期，尽量缩小与实时写入的竞态窗口：
+  // 1) 确保今日行存在（若不存在则插入空行）
+  // 2) 立即写入 lastGenAt 标记“生成中”，使其它写入命中保护逻辑
+  try {
+    await pdb.setDayCounts(today, 0, 0);
+    await pdb.setDayAiMeta(today, { lastGenAt: Date.now() });
+  } catch {}
+
   // Prefer chunked summarization to avoid context overflow; fallback到单次；若离线则本地生成摘要
   let summaryRes: { text: string; model?: string; provider?: string; tokens?: number; durationMs?: number; chunksCount?: number };
   const offline = !!(cfg as any)?.offlineMode;
@@ -149,9 +157,9 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
 
   // Compute blended progress percent using trend, prevBase, local/localScore, aiScore, and total changes
   const hasChanges = (ns.insertions + ns.deletions) > 0 || (localScore > 0) || (feats.hunks > 0);
-  // Persist counts first so today's trend/base are up-to-date
+  // 先持久化“总量”计数：Git 自当天起的累计，应使用 setDayCounts（非增量）
   try {
-    await pdb.upsertDayAccumulate(today, ns.insertions, ns.deletions);
+    await pdb.setDayCounts(today, ns.insertions, ns.deletions);
   } catch {}
   let progressPercent = 0;
   try {
@@ -172,7 +180,7 @@ export async function generateTodaySummary(opts?: { onProgress?: (done: number, 
   // Persist summary & aggregates & metrics & meta
   try {
     const existed = await pdb.getDay(today);
-    if (!existed) await pdb.upsertDayAccumulate(today, 0, 0);
+    // setDayCounts 已确保行存在，这里仅在有内容时写入摘要
     if (markdown) await pdb.setDaySummary(today, markdown);
     await pdb.updateAggregatesForDate(today);
   } catch {}
