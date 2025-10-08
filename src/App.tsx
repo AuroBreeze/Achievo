@@ -382,7 +382,53 @@ function App() {
                       {(typeof histSelected.aiScore==='number') ? `AI: ${histSelected.aiScore} · ` : ''}
                       {(typeof histSelected.localScore==='number') ? `本地: ${histSelected.localScore}` : ''}
                     </div>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{histSelected.summary || '（无内容）'}</ReactMarkdown>
+                    {(() => {
+                      let mdSource = String(histSelected.summary || '');
+                      const raw = mdSource;
+                      // parse plain JSON object with markdown/summary/text fields
+                      if (/^\s*\{[\s\S]*\}\s*$/.test(raw)) {
+                        try {
+                          const obj = JSON.parse(raw);
+                          let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                          if (typeof md === 'string' && md.trim()) {
+                            md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                            mdSource = md;
+                          }
+                        } catch {}
+                      }
+                      // strip fenced JSON blocks ```...``` if they contain a markdown field
+                      if (mdSource.includes('```')) {
+                        const fenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
+                        mdSource = mdSource.replace(fenceRe, (_m, inner) => {
+                          try {
+                            const obj = JSON.parse(String(inner));
+                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                            if (typeof md === 'string' && md.trim()) {
+                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                              return md;
+                            }
+                          } catch {}
+                          return _m;
+                        });
+                        const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
+                        mdSource = mdSource.replace(inlineFenceRe, (_m, inner) => {
+                          try {
+                            const obj = JSON.parse(String(inner));
+                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                            if (typeof md === 'string' && md.trim()) {
+                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                              return md;
+                            }
+                          } catch {}
+                          return _m;
+                        });
+                      }
+                      return (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {mdSource || '（无内容）'}
+                        </ReactMarkdown>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <div className="text-slate-400">请选择左侧日期以查看当日总结</div>

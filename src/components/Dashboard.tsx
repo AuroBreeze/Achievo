@@ -181,14 +181,74 @@ const Dashboard: React.FC = () => {
   const currentRepoRef = React.useRef<string>('');
   const repoReloadTimer = React.useRef<number | null>(null);
   const [offlineMode, setOfflineMode] = useState<boolean>(false);
-  // guard against stale async updates when multiple loads race
-  const loadSeqRef = React.useRef<number>(0);
+  // guard against stale async updates when multiple loads race (per-loader tokens)
+  const seqTodayRef = React.useRef<number>(0);
+  const seqTotalsRef = React.useRef<number>(0);
+  const seqLiveRef = React.useRef<number>(0);
+  const seqRangeRef = React.useRef<number>(0);
+  const refreshSeqRef = React.useRef<number>(0);
+
+  // unified refresh to avoid interleaved state updates
+  const refreshAll = React.useCallback(async () => {
+    const rseq = ++refreshSeqRef.current;
+    if (!window.api) return;
+    try {
+      // fetch in parallel
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const [live, t, totalsLive, totalsDb, range] = await Promise.allSettled([
+        window.api.statsGetTodayLive(),
+        window.api.statsGetToday(),
+        window.api.statsGetTotalsLive(),
+        window.api.statsGetTotals(),
+        window.api.statsGetRange({ startDate: toKey(start), endDate: toKey(end) }),
+      ]);
+      if (rseq !== refreshSeqRef.current) return;
+      // apply todayLive
+      if (live.status === 'fulfilled') setTodayLive(live.value);
+      // apply today row
+      if (t.status === 'fulfilled' && t.value) {
+        const tv = t.value as any;
+        setToday(tv);
+        const dbSummary = typeof tv?.summary === 'string' ? String(tv.summary).trim() : '';
+        if (dbSummary) setTodayText(dbSummary);
+        if (typeof tv?.localScore === 'number') setScoreLocal(tv.localScore);
+        if (typeof tv?.aiScore === 'number') setScoreAi(tv.aiScore);
+        if (typeof tv?.progressPercent === 'number') setProgressPercent(tv.progressPercent);
+        setLastGenAt(tv?.lastGenAt ?? null);
+        setChunksCount(typeof tv?.chunksCount === 'number' ? tv.chunksCount : null);
+        setAiModel(tv?.aiModel ?? null);
+        setAiProvider(tv?.aiProvider ?? null);
+        setAiTokens(typeof tv?.aiTokens === 'number' ? tv.aiTokens : null);
+        setAiDurationMs(typeof tv?.aiDurationMs === 'number' ? tv.aiDurationMs : null);
+      }
+      // apply totals (prefer live if available)
+      if (totalsLive.status === 'fulfilled' && totalsLive.value) setTotals(totalsLive.value);
+      else if (totalsDb.status === 'fulfilled' && totalsDb.value) setTotals(totalsDb.value);
+      // apply daily range
+      if (range.status === 'fulfilled' && Array.isArray(range.value)) {
+        type RowIn = { date: string; baseScore: number; aiScore?: number | null; localScore?: number | null; progressPercent?: number | null };
+        const mapped = ((range.value || []) as RowIn[])
+          .map((r: RowIn) => ({
+            date: r.date,
+            baseScore: r.baseScore,
+            aiScore: (r as any).aiScore ?? null,
+            localScore: (r as any).localScore ?? null,
+            progressPercent: (r as any).progressPercent ?? null,
+          }))
+          .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+        setDaily(mapped);
+      }
+    } catch {}
+  }, []);
 
   const loadToday = async () => {
-    const seq = ++loadSeqRef.current;
+    const seq = ++seqTodayRef.current;
     if (!window.api) return;
     const t = await window.api.statsGetToday();
-    if (seq !== loadSeqRef.current) return;
+    if (seq !== seqTodayRef.current) return;
     setToday(t);
     // only overwrite summary when DB has non-empty content to prevent accidental clearing
     const dbSummary = typeof t?.summary === 'string' ? t.summary.trim() : '';
@@ -231,6 +291,7 @@ const Dashboard: React.FC = () => {
   };
 
   const loadTotals = async () => {
+    const seq = ++seqTotalsRef.current;
     if (!window.api) return;
     let t2: { insertions: number; deletions: number; total: number } | null = null;
     try {
@@ -238,13 +299,16 @@ const Dashboard: React.FC = () => {
     } catch {
       t2 = await window.api.statsGetTotals();
     }
+    if (seq !== seqTotalsRef.current) return;
     setTotals(t2);
   };
 
   const loadTodayLive = async () => {
+    const seq = ++seqLiveRef.current;
     if (!window.api) return;
     try {
       const r = await window.api.statsGetTodayLive();
+      if (seq !== seqLiveRef.current) return;
       setTodayLive(r);
     } catch {}
   };
@@ -264,6 +328,7 @@ const Dashboard: React.FC = () => {
   };
 
   const loadDailyRange = React.useCallback(async () => {
+    const seq = ++seqRangeRef.current;
     if (!window.api?.statsGetRange) return;
     const end = new Date();
     const start = new Date();
@@ -280,6 +345,7 @@ const Dashboard: React.FC = () => {
         progressPercent: (r as any).progressPercent ?? null,
       }))
       .sort((a: { date: string }, b: { date: string }) => a.date.localeCompare(b.date));
+    if (seq !== seqRangeRef.current) return;
     setDaily(mapped);
   }, []);
 
@@ -295,10 +361,7 @@ const Dashboard: React.FC = () => {
           if (typeof cfg?.repoPath === 'string') { setCurrentRepo(cfg.repoPath); currentRepoRef.current = cfg.repoPath; }
         }
       } catch {}
-      await loadTodayLive();
-      await loadToday();
-      await loadTotals();
-      await loadDailyRange();
+      await refreshAll();
     })();
     // listen for config changes
     const onCfg = (e: any) => {
@@ -308,12 +371,7 @@ const Dashboard: React.FC = () => {
         const nextOffline = !!e.detail.offlineMode;
         setOfflineMode(nextOffline);
         // 切换离线/在线后，立即从 DB 端读取今日与图表，避免 UI 依赖旧的本地缓存
-        (async () => {
-          await loadTodayLive();
-          await loadToday();
-          await loadTotals();
-          await loadDailyRange();
-        })();
+        (async () => { await refreshAll(); })();
       }
       // If repoPath changed, force reload all series from new repo DB
       if (typeof e?.detail?.repoPath === 'string') {
@@ -342,29 +400,21 @@ const Dashboard: React.FC = () => {
           setJobProgress(0);
           // Immediate reload for the selected repo to avoid stale display
           if (repoReloadTimer.current) { clearTimeout(repoReloadTimer.current); repoReloadTimer.current = null; }
-          (async () => {
-            await loadTodayLive();
-            await loadToday();
-            await loadTotals();
-            await loadDailyRange();
-          })();
+          (async () => { await refreshAll(); })();
         }
       }
     };
     window.addEventListener('config:updated' as any, onCfg as any);
     return () => { window.removeEventListener('config:updated' as any, onCfg as any); };
-  }, [loadDailyRange]);
+  }, [loadDailyRange, refreshAll]);
 
   React.useEffect(() => {
     const ms = Math.max(1000, (pollSeconds || 10) * 1000);
     const id = setInterval(async () => {
-      await loadTodayLive();
-      await loadToday();
-      await loadTotals();
-      await loadDailyRange();
+      await refreshAll();
     }, ms);
     return () => clearInterval(id);
-  }, [pollSeconds, loadDailyRange]);
+  }, [pollSeconds, loadDailyRange, refreshAll]);
 
   // Subscribe background job progress and restore status on mount/route return
   React.useEffect(() => {
@@ -400,10 +450,7 @@ const Dashboard: React.FC = () => {
           }
         } catch {}
         // Refresh persisted values
-        await loadToday();
-        await loadTotals();
-        await loadTodayLive();
-        await loadDailyRange();
+        await refreshAll();
       }
     });
     (async () => {
@@ -424,10 +471,7 @@ const Dashboard: React.FC = () => {
           if (typeof r.aiProvider === 'string' || r.aiProvider === null) setAiProvider(r.aiProvider ?? null);
           if (typeof r.aiTokens === 'number') setAiTokens(r.aiTokens);
           if (typeof r.aiDurationMs === 'number') setAiDurationMs(r.aiDurationMs);
-          await loadToday();
-          await loadTotals();
-          await loadTodayLive();
-          await loadDailyRange();
+          await refreshAll();
         }
       } catch {}
     })();
