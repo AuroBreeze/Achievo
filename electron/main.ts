@@ -9,6 +9,7 @@ import { TrackerService } from './services/tracker';
 import { StatsService } from './services/stats';
 import { DB } from './services/db_sqljs';
 import { generateTodaySummary, buildTodayUnifiedDiff } from './services/summaryService';
+import { PeriodSummaryService } from './services/periodSummaryService';
 import { JobManager } from './services/jobManager';
 import { createMainWindow } from './services/window';
 import { applyLoggerConfig, setLogFile, getLogger } from './services/logger';
@@ -370,6 +371,71 @@ ipcMain.handle('stats:getDay', async (_evt, payload: { date: string }) => {
   const cfg = await getConfig();
   const db = new DB({ repoPath: cfg.repoPath });
   return db.getDay(payload.date);
+});
+
+// Helpers: week range by ISO week key (YYYY-Www)
+function getIsoWeekRangeByKey(weekKey: string): { start: string; end: string } | null {
+  const m = /^([0-9]{4})-W([0-9]{2})$/.exec(String(weekKey));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const w = Number(m[2]);
+  const firstThursday = new Date(Date.UTC(year, 0, 4));
+  const dayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - dayNum + 3);
+  const target = new Date(firstThursday);
+  target.setUTCDate(firstThursday.getUTCDate() + (w - 1) * 7);
+  const monday = new Date(target);
+  monday.setUTCDate(target.getUTCDate() - 3);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const toKey = (x: Date) => new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate())).toISOString().slice(0, 10);
+  return { start: toKey(monday), end: toKey(sunday) };
+}
+
+// Stats: week by key
+ipcMain.handle('stats:getWeek', async (_evt, payload: { week: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getWeek(payload.week);
+});
+
+// Stats: month by key
+ipcMain.handle('stats:getMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getMonth(payload.month);
+});
+
+// Stats: weeks in a month
+ipcMain.handle('stats:getWeeksInMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getWeeksInMonth(payload.month);
+});
+
+// Stats: week range helper
+ipcMain.handle('stats:getWeekRange', async (_evt, payload: { week: string }) => {
+  return getIsoWeekRangeByKey(payload.week);
+});
+
+// Summary: generate week summary
+ipcMain.handle('summary:generateWeek', async (_evt, payload: { week: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const svc = new PeriodSummaryService(db);
+  const row = await svc.generateWeekSummary(payload.week);
+  if (win) { try { win.webContents.send('period:summary:updated', { scope: 'week', key: payload.week }); } catch {} }
+  return row;
+});
+
+// Summary: generate month summary
+ipcMain.handle('summary:generateMonth', async (_evt, payload: { month: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  const svc = new PeriodSummaryService(db);
+  const row = await svc.generateMonthSummary(payload.month);
+  if (win) { try { win.webContents.send('period:summary:updated', { scope: 'month', key: payload.month }); } catch {} }
+  return row;
 });
 
 ipcMain.handle('summary:generate', async () => {

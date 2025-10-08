@@ -49,7 +49,7 @@ export class DB {
     try { if (!fsSync.existsSync(dbDir)) fsSync.mkdirSync(dbDir, { recursive: true }); } catch {}
     // Derive db file name: default achievo.sqljs; if repoPath provided, use a hashed/sanitized variant
     const fileName = (() => {
-      // explicit name wins
+      // 优先使用显式名称
       if (opts?.name && opts.name.trim()) return `${sanitizeFile(opts.name.trim())}.sqljs`;
       const repo = opts?.repoPath;
       if (repo && repo.trim()) {
@@ -229,7 +229,17 @@ export class DB {
         insertions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
         baseScore INTEGER NOT NULL DEFAULT 0,
+        trend INTEGER NOT NULL DEFAULT 0,
         summary TEXT,
+        aiScore INTEGER,
+        localScore INTEGER,
+        progressPercent INTEGER,
+        aiModel TEXT,
+        aiProvider TEXT,
+        aiTokens INTEGER,
+        aiDurationMs INTEGER,
+        chunksCount INTEGER,
+        lastGenAt INTEGER,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -238,7 +248,17 @@ export class DB {
         insertions INTEGER NOT NULL DEFAULT 0,
         deletions INTEGER NOT NULL DEFAULT 0,
         baseScore INTEGER NOT NULL DEFAULT 0,
+        trend INTEGER NOT NULL DEFAULT 0,
         summary TEXT,
+        aiScore INTEGER,
+        localScore INTEGER,
+        progressPercent INTEGER,
+        aiModel TEXT,
+        aiProvider TEXT,
+        aiTokens INTEGER,
+        aiDurationMs INTEGER,
+        chunksCount INTEGER,
+        lastGenAt INTEGER,
         createdAt INTEGER NOT NULL,
         updatedAt INTEGER NOT NULL
       );
@@ -263,6 +283,27 @@ export class DB {
     try { this.db.run(`ALTER TABLE days ADD COLUMN aiDurationMs INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN chunksCount INTEGER`); } catch {}
     try { this.db.run(`ALTER TABLE days ADD COLUMN lastGenAt INTEGER`); } catch {}
+    // weeks/months alignment
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN trend INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN aiScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN localScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN progressPercent INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN aiModel TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN aiProvider TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN aiTokens INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN aiDurationMs INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN chunksCount INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE weeks ADD COLUMN lastGenAt INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN trend INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN aiScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN localScore INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN progressPercent INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN aiModel TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN aiProvider TEXT`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN aiTokens INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN aiDurationMs INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN chunksCount INTEGER`); } catch {}
+    try { this.db.run(`ALTER TABLE months ADD COLUMN lastGenAt INTEGER`); } catch {}
     this.persist();
   }
 
@@ -286,6 +327,77 @@ export class DB {
     const res = this.db.exec(`SELECT * FROM days WHERE date BETWEEN '${startDate}' AND '${endDate}' ORDER BY date ASC`);
     if (!res[0]) return [];
     return mapRow<DayRow>(res[0]);
+  }
+
+  // ===== 周/月 辅助方法 =====
+  async getWeek(weekKey: string): Promise<any | null> {
+    await this.ready;
+    const res = this.db.exec(`SELECT * FROM weeks WHERE week='${weekKey.replace(/'/g, "''")}' LIMIT 1`);
+    if (!res[0]) return null;
+    return mapRow<any>(res[0])[0] || null;
+  }
+
+  async setWeekRow(weekKey: string, data: Partial<DayRow> & { insertions?: number; deletions?: number; }): Promise<void> {
+    await this.ready;
+    const now = Date.now();
+    const exists = this.db.exec(`SELECT 1 FROM weeks WHERE week='${weekKey.replace(/'/g, "''")}' LIMIT 1`);
+    const cols = ['insertions','deletions','baseScore','trend','summary','aiScore','localScore','progressPercent','aiModel','aiProvider','aiTokens','aiDurationMs','chunksCount','lastGenAt'];
+    const vals: any[] = cols.map(k => (data as any)[k] ?? null);
+    if (!exists[0]) {
+      this.db.run(`INSERT INTO weeks(week, ${cols.join(',')}, createdAt, updatedAt) VALUES(?, ${cols.map(()=>'?').join(',')}, ?, ?)`, [weekKey, ...vals, now, now]);
+    } else {
+      this.db.run(`UPDATE weeks SET ${cols.map(c=>`${c}=?`).join(',')}, updatedAt=? WHERE week=?`, [...vals, now, weekKey]);
+    }
+    await this.persist();
+  }
+
+  async getMonth(monthKey: string): Promise<any | null> {
+    await this.ready;
+    const res = this.db.exec(`SELECT * FROM months WHERE month='${monthKey.replace(/'/g, "''")}' LIMIT 1`);
+    if (!res[0]) return null;
+    return mapRow<any>(res[0])[0] || null;
+  }
+
+  async setMonthRow(monthKey: string, data: Partial<DayRow> & { insertions?: number; deletions?: number; }): Promise<void> {
+    await this.ready;
+    const now = Date.now();
+    const exists = this.db.exec(`SELECT 1 FROM months WHERE month='${monthKey.replace(/'/g, "''")}' LIMIT 1`);
+    const cols = ['insertions','deletions','baseScore','trend','summary','aiScore','localScore','progressPercent','aiModel','aiProvider','aiTokens','aiDurationMs','chunksCount','lastGenAt'];
+    const vals: any[] = cols.map(k => (data as any)[k] ?? null);
+    if (!exists[0]) {
+      this.db.run(`INSERT INTO months(month, ${cols.join(',')}, createdAt, updatedAt) VALUES(?, ${cols.map(()=>'?').join(',')}, ?, ?)`, [monthKey, ...vals, now, now]);
+    } else {
+      this.db.run(`UPDATE months SET ${cols.map(c=>`${c}=?`).join(',')}, updatedAt=? WHERE month=?`, [...vals, now, monthKey]);
+    }
+    await this.persist();
+  }
+
+  async getWeeksInMonth(monthKey: string): Promise<string[]> {
+    await this.ready;
+    const res = this.db.exec(`SELECT date FROM days WHERE substr(date,1,7)='${monthKey}'`);
+    if (!res[0]) return [];
+    const rows = mapRow<{date: string}>(res[0]);
+    const keys = new Set<string>();
+    for (const r of rows) keys.add(this.getWeekKey(r.date));
+    return Array.from(keys).sort();
+  }
+
+  async getWeeksWithData(limit = 50): Promise<string[]> {
+    await this.ready;
+    const sql = `SELECT week FROM weeks WHERE (summary IS NOT NULL AND TRIM(summary)!='') OR lastGenAt IS NOT NULL ORDER BY week DESC LIMIT ${Math.max(1, Math.min(500, Number(limit)||50))}`;
+    const res = this.db.exec(sql);
+    if (!res[0]) return [];
+    const rows = mapRow<{week: string}>(res[0]);
+    return rows.map(r => r.week).filter(Boolean);
+  }
+
+  async getMonthsWithData(limit = 24): Promise<string[]> {
+    await this.ready;
+    const sql = `SELECT month FROM months WHERE (summary IS NOT NULL AND TRIM(summary)!='') OR lastGenAt IS NOT NULL ORDER BY month DESC LIMIT ${Math.max(1, Math.min(500, Number(limit)||24))}`;
+    const res = this.db.exec(sql);
+    if (!res[0]) return [];
+    const rows = mapRow<{month: string}>(res[0]);
+    return rows.map(r => r.month).filter(Boolean);
   }
 
   async upsertDayAccumulate(date: string, deltaIns: number, deltaDel: number): Promise<DayRow> {

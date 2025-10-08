@@ -20,11 +20,17 @@ function App() {
   const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
   // history view states
+  const [histTab, setHistTab] = useState<'day'|'week'|'month'>('day');
   const [histRepoPath, setHistRepoPath] = useState<string>('');
   const [histDbFile, setHistDbFile] = useState<string>('');
   const [histItems, setHistItems] = useState<Array<{ date: string; baseScore: number; trend?: number; aiScore?: number|null; localScore?: number|null; lastGenAt?: number|null; summary?: string|null }>>([]);
   const [histSelectedDate, setHistSelectedDate] = useState<string>('');
   const [histSelected, setHistSelected] = useState<{ date: string; summary: string; aiScore?: number|null; localScore?: number|null; progressPercent?: number|null; aiModel?: string|null; aiProvider?: string|null; lastGenAt?: number|null } | null>(null);
+  const [histWeeks, setHistWeeks] = useState<string[]>([]);
+  const [histWeeksMonth, setHistWeeksMonth] = useState<string>('');
+  const [histSelectedWeek, setHistSelectedWeek] = useState<string>('');
+  const [histMonths, setHistMonths] = useState<string[]>([]);
+  const [histSelectedMonth, setHistSelectedMonth] = useState<string>('');
   // debounced hover control to make sidebar open/close smoother
   const openTimer = React.useRef<number | null>(null);
   const closeTimer = React.useRef<number | null>(null);
@@ -126,6 +132,22 @@ function App() {
           }
         } catch{}
       }
+    } catch {}
+    // weeks for current month
+    try {
+      const now = new Date();
+      const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      setHistWeeksMonth(monthKey);
+      const ws: string[] = await (window as any).api?.statsGetWeeksInMonth?.({ month: monthKey });
+      setHistWeeks(Array.isArray(ws) ? ws : []);
+    } catch {}
+    // months list last 12
+    try {
+      const now = new Date();
+      const list: string[] = [];
+      for (let i=0;i<12;i++) { const d = new Date(now); d.setMonth(now.getMonth()-i); list.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }
+      setHistMonths(list);
+      if (!histSelectedMonth && list.length) setHistSelectedMonth(list[0]!);
     } catch {}
   };
 
@@ -360,26 +382,64 @@ function App() {
               </section>
               {/* left list */}
               <section className="lg:col-span-1 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
-                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur">
+                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur flex items-center gap-2">
                   <h3 className="text-sm font-semibold text-slate-100">历史摘要</h3>
+                  <div className="ml-auto flex items-center gap-1">
+                    <button onClick={()=>setHistTab('day')} className={`text-xs px-2 py-1 rounded ${histTab==='day'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>日</button>
+                    <button onClick={()=>setHistTab('week')} className={`text-xs px-2 py-1 rounded ${histTab==='week'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>周</button>
+                    <button onClick={()=>setHistTab('month')} className={`text-xs px-2 py-1 rounded ${histTab==='month'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-200'}`}>月</button>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-auto px-3 py-2 space-y-1">
-                  {histItems.length === 0 && <div className="text-xs text-slate-400">最近暂无生成的摘要</div>}
-                  {histItems.map(item => (
-                    <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-3 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm text-slate-100">{item.date}</div>
-                        <div className="text-[11px] text-slate-400">基 {item.baseScore}{typeof item.trend==='number' ? ` (${item.trend>=0?'+':''}${item.trend})` : ''}</div>
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">AI {(item.aiScore??'—')} · 本地 {(item.localScore??'—')} {item.lastGenAt ? `· ${new Date(Number(item.lastGenAt)).toLocaleString()}` : ''}</div>
-                    </button>
-                  ))}
+                  {histTab==='day' && (
+                    <>
+                      {histItems.length === 0 && <div className="text-xs text-slate-400">最近暂无生成的摘要</div>}
+                      {histItems.map(item => (
+                        <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-3 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-sm text-slate-100">{item.date}</div>
+                            <div className="text-[11px] text-slate-400">基 {item.baseScore}{typeof item.trend==='number' ? ` (${item.trend>=0?'+':''}${item.trend})` : ''}</div>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">AI {(item.aiScore??'—')} · 本地 {(item.localScore??'—')} {item.lastGenAt ? `· ${new Date(Number(item.lastGenAt)).toLocaleString()}` : ''}</div>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {histTab==='week' && (
+                    <>
+                      {histWeeks.length === 0 && <div className="text-xs text-slate-400">{histWeeksMonth} 暂无周总结</div>}
+                      {histWeeks.map(wk => (
+                        <div key={wk} className={`w-full text-left px-3 py-2 rounded border ${histSelectedWeek===wk ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <button onClick={async()=>{ setHistSelectedWeek(wk); try { const d = await (window as any).api?.statsGetWeek?.({ week: wk }); setHistSelected({ date: wk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-sm text-slate-100">{wk}</button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={async()=>{ try { await (window as any).api?.summaryGenerateWeek?.({ week: wk }); const d = await (window as any).api?.statsGetWeek?.({ week: wk }); if (histSelectedWeek===wk) setHistSelected({ date: wk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-[11px] px-2 py-0.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">生成</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {histTab==='month' && (
+                    <>
+                      {histMonths.map(mk => (
+                        <div key={mk} className={`w-full text-left px-3 py-2 rounded border ${histSelectedMonth===mk ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <button onClick={async()=>{ setHistSelectedMonth(mk); try { const d = await (window as any).api?.statsGetMonth?.({ month: mk }); setHistSelected({ date: mk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-sm text-slate-100">{mk}</button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={async()=>{ try { await (window as any).api?.summaryGenerateMonth?.({ month: mk }); const d = await (window as any).api?.statsGetMonth?.({ month: mk }); if (histSelectedMonth===mk) setHistSelected({ date: mk, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: d?.aiModel ?? null, aiProvider: d?.aiProvider ?? null, lastGenAt: d?.lastGenAt ?? null }); } catch {} }} className="text-[11px] px-2 py-0.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10">生成</button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               </section>
               {/* right preview */}
               <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
                 <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur">
-                  <h3 className="text-sm font-semibold text-slate-100">{histSelected?.date || '选择一个日期'}</h3>
+                  <h3 className="text-sm font-semibold text-slate-100">{histSelected?.date || (histTab==='day'?'选择一个日期': (histTab==='week'?'选择一个周键':'选择一个月份'))}</h3>
                 </div>
                 <div className="flex-1 overflow-auto p-4">
                   {histSelected ? (
