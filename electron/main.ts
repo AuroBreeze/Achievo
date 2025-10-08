@@ -365,6 +365,13 @@ ipcMain.handle('stats:getRange', async (_evt, payload: { startDate: string; endD
   return db.getDaysRange(payload.startDate, payload.endDate);
 });
 
+// Single day by date (YYYY-MM-DD)
+ipcMain.handle('stats:getDay', async (_evt, payload: { date: string }) => {
+  const cfg = await getConfig();
+  const db = new DB({ repoPath: cfg.repoPath });
+  return db.getDay(payload.date);
+});
+
 ipcMain.handle('summary:generate', async () => {
   // Create a stats service bound to current repo DB
   const cfg = await getConfig();

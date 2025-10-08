@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   trackingStatus: () => ipcRenderer.invoke('tracking:status'),
   statsGetToday: () => ipcRenderer.invoke('stats:getToday'),
   statsGetRange: (payload: { startDate: string; endDate: string }) => ipcRenderer.invoke('stats:getRange', payload),
+  statsGetDay: (payload: { date: string }) => ipcRenderer.invoke('stats:getDay', payload),
   statsGetTotals: () => ipcRenderer.invoke('stats:getTotals'),
   statsGetTodayLive: () => ipcRenderer.invoke('stats:getTodayLive'),
   statsGetTotalsLive: () => ipcRenderer.invoke('stats:getTotalsLive'),

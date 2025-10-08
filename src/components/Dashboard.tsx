@@ -181,13 +181,20 @@ const Dashboard: React.FC = () => {
   const currentRepoRef = React.useRef<string>('');
   const repoReloadTimer = React.useRef<number | null>(null);
   const [offlineMode, setOfflineMode] = useState<boolean>(false);
+  // guard against stale async updates when multiple loads race
+  const loadSeqRef = React.useRef<number>(0);
 
   const loadToday = async () => {
+    const seq = ++loadSeqRef.current;
     if (!window.api) return;
     const t = await window.api.statsGetToday();
+    if (seq !== loadSeqRef.current) return;
     setToday(t);
-    // set summary text from DB to avoid stale value when switching repos
-    setTodayText(String(t?.summary || ''));
+    // only overwrite summary when DB has non-empty content to prevent accidental clearing
+    const dbSummary = typeof t?.summary === 'string' ? t.summary.trim() : '';
+    if (dbSummary) {
+      setTodayText(dbSummary);
+    }
     // initialize metrics from persisted DB values if available
     if (typeof t?.localScore === 'number') setScoreLocal(t.localScore);
     if (typeof t?.aiScore === 'number') setScoreAi(t.aiScore);
@@ -212,7 +219,7 @@ const Dashboard: React.FC = () => {
           if (typeof md === 'string' && md.trim()) s = md;
         } catch {}
       }
-      setTodayText(s);
+      if (s && s.trim()) setTodayText(s);
       // derive chunks count if DB meta not present
       if (t && typeof (t as any).chunksCount !== 'number') {
         try {

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Dashboard from '@/components/Dashboard';
 import Settings from '@/components/settings/SettingsIndex';
 import Repo from '@/components/Repo';
@@ -17,6 +19,12 @@ function App() {
   const [quoteEnabled, setQuoteEnabled] = useState<boolean>(true);
   const [quoteRefreshSeconds, setQuoteRefreshSeconds] = useState<number>(180);
   const [quoteLetterSpacing, setQuoteLetterSpacing] = useState<number>(0);
+  // history view states
+  const [histRepoPath, setHistRepoPath] = useState<string>('');
+  const [histDbFile, setHistDbFile] = useState<string>('');
+  const [histItems, setHistItems] = useState<Array<{ date: string; baseScore: number; trend?: number; aiScore?: number|null; localScore?: number|null; lastGenAt?: number|null; summary?: string|null }>>([]);
+  const [histSelectedDate, setHistSelectedDate] = useState<string>('');
+  const [histSelected, setHistSelected] = useState<{ date: string; summary: string; aiScore?: number|null; localScore?: number|null; progressPercent?: number|null; aiModel?: string|null; aiProvider?: string|null; lastGenAt?: number|null } | null>(null);
   // debounced hover control to make sidebar open/close smoother
   const openTimer = React.useRef<number | null>(null);
   const closeTimer = React.useRef<number | null>(null);
@@ -66,10 +74,63 @@ function App() {
       if (typeof d.quoteEnabled === 'boolean') setQuoteEnabled(d.quoteEnabled);
       if (typeof d.quoteRefreshSeconds === 'number' && d.quoteRefreshSeconds > 0) setQuoteRefreshSeconds(d.quoteRefreshSeconds);
       if (typeof d.quoteLetterSpacing === 'number') setQuoteLetterSpacing(d.quoteLetterSpacing);
+      // if repo changes, refresh history info lazily
+      if (typeof d.repoPath === 'string') {
+        loadHistoryPanel();
+      }
     };
     window.addEventListener('config:updated' as any, handler);
     return () => window.removeEventListener('config:updated' as any, handler);
   }, []);
+
+  // load history sidebar/panel data
+  const loadHistoryPanel = async () => {
+    try {
+      const cfg: any = await (window as any).api?.getConfig?.();
+      setHistRepoPath(cfg?.repoPath || '');
+    } catch {}
+    try {
+      const f = await (window as any).api?.dbCurrentFile?.();
+      setHistDbFile(f || '');
+    } catch {}
+    // last 60 days, filter days with summary or lastGenAt
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 59);
+      const toKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const rows: any[] = await (window as any).api?.statsGetRange?.({ startDate: toKey(start), endDate: toKey(end) });
+      const items = (rows || [])
+        .filter(r => (r?.summary && String(r.summary).trim()) || typeof (r as any)?.lastGenAt === 'number')
+        .map(r => ({
+          date: r.date,
+          baseScore: r.baseScore,
+          trend: (r as any).trend,
+          aiScore: (r as any).aiScore ?? null,
+          localScore: (r as any).localScore ?? null,
+          lastGenAt: (r as any).lastGenAt ?? null,
+          summary: r.summary ?? null,
+        }))
+        .sort((a,b) => b.date.localeCompare(a.date));
+      setHistItems(items);
+      if (items.length > 0 && !histSelectedDate) {
+        const first = items[0]!;
+        setHistSelectedDate(first.date);
+        // preload first
+        try {
+          if ((window as any).api?.statsGetDay) {
+            const d = await (window as any).api.statsGetDay({ date: first.date });
+            setHistSelected({ date: first.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null });
+          } else {
+            setHistSelected({ date: first.date, summary: String(first.summary||'') });
+          }
+        } catch{}
+      }
+    } catch {}
+  };
+
+  // when switching to History tab, load data
+  useEffect(() => { if (tab === 'history') { loadHistoryPanel(); } }, [tab]);
 
   // fetch a short quote with timeouts and robust fallbacks
   const fetchWithTimeout = async (input: RequestInfo | URL, init?: RequestInit, ms = 4000) => {
@@ -289,8 +350,44 @@ function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'repo' && <Repo />}
           {tab === 'history' && (
-            <div className="bg-slate-800 rounded p-4 border border-slate-700">
-              <div className="text-slate-300">历史图表已移动到仪表盘中。</div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <section className="lg:col-span-3 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
+                <div className="text-sm text-slate-300 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div className="truncate"><span className="text-slate-400">当前仓库：</span><span className="text-slate-200 break-all">{histRepoPath || '—'}</span></div>
+                  <div className="truncate"><span className="text-slate-400">数据库：</span><span className="text-slate-200 break-all">{histDbFile || '—'}</span></div>
+                </div>
+              </section>
+              <section className="lg:col-span-1 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg min-h-[60vh]">
+                <h3 className="text-sm font-semibold text-slate-100 mb-2">历史摘要</h3>
+                <div className="space-y-1 max-h-[65vh] overflow-auto pr-1">
+                  {histItems.length === 0 && <div className="text-xs text-slate-400">最近暂无生成的摘要</div>}
+                  {histItems.map(item => (
+                    <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-2 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm text-slate-100">{item.date}</div>
+                        <div className="text-[11px] text-slate-400">基 {item.baseScore}{typeof item.trend==='number' ? ` (${item.trend>=0?'+':''}${item.trend})` : ''}</div>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">AI {(item.aiScore??'—')} · 本地 {(item.localScore??'—')} {item.lastGenAt ? `· ${new Date(Number(item.lastGenAt)).toLocaleString()}` : ''}</div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+              <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg min-h-[60vh]">
+                <h3 className="text-sm font-semibold text-slate-100 mb-1">{histSelected?.date || '选择一个日期'}</h3>
+                {histSelected ? (
+                  <div className="prose prose-invert max-w-none text-slate-200">
+                    <div className="text-xs text-slate-400 mb-2">
+                      {(histSelected.lastGenAt ? `上次: ${new Date(Number(histSelected.lastGenAt)).toLocaleString()} · ` : '')}
+                      {(typeof histSelected.progressPercent==='number') ? `进度: ${histSelected.progressPercent}% · ` : ''}
+                      {(typeof histSelected.aiScore==='number') ? `AI: ${histSelected.aiScore} · ` : ''}
+                      {(typeof histSelected.localScore==='number') ? `本地: ${histSelected.localScore}` : ''}
+                    </div>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{histSelected.summary || '（无内容）'}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="text-slate-400">请选择左侧日期以查看当日总结</div>
+                )}
+              </section>
             </div>
           )}
           {tab === 'settings' && <Settings />}
