@@ -48,7 +48,12 @@ const SettingsAI: React.FC = () => {
   return (
     <section className="bg-gradient-to-b from-slate-800/80 to-slate-900/60 border border-slate-700/70 rounded-lg p-4 shadow-lg">
       <header className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-slate-100">AI 设置</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-slate-100">AI 设置</h3>
+          {offlineMode && (
+            <span className="px-2 py-0.5 text-[11px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/40" title="离线模式启用中：不会调用外部 AI 服务">离线模式</span>
+          )}
+        </div>
         {saved && <span className="text-green-400 text-sm">{saved}</span>}
       </header>
       <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${offlineMode ? 'opacity-90' : ''}`}>

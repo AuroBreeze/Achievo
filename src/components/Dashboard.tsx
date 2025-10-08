@@ -297,7 +297,17 @@ const Dashboard: React.FC = () => {
     const onCfg = (e: any) => {
       const dps = typeof e?.detail?.dbPollSeconds === 'number' && e.detail.dbPollSeconds > 0 ? e.detail.dbPollSeconds : null;
       if (dps) setPollSeconds(dps);
-      if (typeof e?.detail?.offlineMode === 'boolean') setOfflineMode(!!e.detail.offlineMode);
+      if (typeof e?.detail?.offlineMode === 'boolean') {
+        const nextOffline = !!e.detail.offlineMode;
+        setOfflineMode(nextOffline);
+        // 切换离线/在线后，立即从 DB 端读取今日与图表，避免 UI 依赖旧的本地缓存
+        (async () => {
+          await loadTodayLive();
+          await loadToday();
+          await loadTotals();
+          await loadDailyRange();
+        })();
+      }
       // If repoPath changed, force reload all series from new repo DB
       if (typeof e?.detail?.repoPath === 'string') {
         const rp = e.detail.repoPath;
