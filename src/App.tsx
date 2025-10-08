@@ -350,19 +350,23 @@ function App() {
           {tab === 'dashboard' && <Dashboard />}
           {tab === 'repo' && <Repo />}
           {tab === 'history' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <section className="lg:col-span-3 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg">
-                <div className="text-sm text-slate-300 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-[calc(100vh-6rem)]">
+              {/* top info bar */}
+              <section className="lg:col-span-3 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden">
+                <div className="px-4 py-3 text-sm text-slate-300 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                   <div className="truncate"><span className="text-slate-400">当前仓库：</span><span className="text-slate-200 break-all">{histRepoPath || '—'}</span></div>
                   <div className="truncate"><span className="text-slate-400">数据库：</span><span className="text-slate-200 break-all">{histDbFile || '—'}</span></div>
                 </div>
               </section>
-              <section className="lg:col-span-1 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg min-h-[60vh]">
-                <h3 className="text-sm font-semibold text-slate-100 mb-2">历史摘要</h3>
-                <div className="space-y-1 max-h-[65vh] overflow-auto pr-1">
+              {/* left list */}
+              <section className="lg:col-span-1 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
+                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur">
+                  <h3 className="text-sm font-semibold text-slate-100">历史摘要</h3>
+                </div>
+                <div className="flex-1 overflow-auto px-3 py-2 space-y-1">
                   {histItems.length === 0 && <div className="text-xs text-slate-400">最近暂无生成的摘要</div>}
                   {histItems.map(item => (
-                    <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-2 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
+                    <button key={item.date} onClick={async()=>{ setHistSelectedDate(item.date); try { const d = await (window as any).api?.statsGetDay?.({ date: item.date }); setHistSelected({ date: item.date, summary: String(d?.summary||''), aiScore: d?.aiScore ?? null, localScore: d?.localScore ?? null, progressPercent: d?.progressPercent ?? null, aiModel: (d as any)?.aiModel ?? null, aiProvider: (d as any)?.aiProvider ?? null, lastGenAt: (d as any)?.lastGenAt ?? null }); } catch {} }} className={`w-full text-left px-3 py-2 rounded border ${histSelectedDate===item.date ? 'border-indigo-500/50 bg-indigo-500/10' : 'border-slate-700/70 hover:bg-slate-700/50'} transition-colors`}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="text-sm text-slate-100">{item.date}</div>
                         <div className="text-[11px] text-slate-400">基 {item.baseScore}{typeof item.trend==='number' ? ` (${item.trend>=0?'+':''}${item.trend})` : ''}</div>
@@ -372,67 +376,70 @@ function App() {
                   ))}
                 </div>
               </section>
-              <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded p-4 border border-slate-700/70 shadow-lg min-h-[60vh]">
-                <h3 className="text-sm font-semibold text-slate-100 mb-1">{histSelected?.date || '选择一个日期'}</h3>
-                {histSelected ? (
-                  <div className="prose prose-invert max-w-none text-slate-200">
-                    <div className="text-xs text-slate-400 mb-2">
-                      {(histSelected.lastGenAt ? `上次: ${new Date(Number(histSelected.lastGenAt)).toLocaleString()} · ` : '')}
-                      {(typeof histSelected.progressPercent==='number') ? `进度: ${histSelected.progressPercent}% · ` : ''}
-                      {(typeof histSelected.aiScore==='number') ? `AI: ${histSelected.aiScore} · ` : ''}
-                      {(typeof histSelected.localScore==='number') ? `本地: ${histSelected.localScore}` : ''}
+              {/* right preview */}
+              <section className="lg:col-span-2 bg-gradient-to-b from-slate-800/80 to-slate-900/60 rounded border border-slate-700/70 shadow-lg overflow-hidden flex flex-col h-full">
+                <div className="px-4 py-2 border-b border-slate-700/70 sticky top-0 bg-slate-900/70 backdrop-blur">
+                  <h3 className="text-sm font-semibold text-slate-100">{histSelected?.date || '选择一个日期'}</h3>
+                </div>
+                <div className="flex-1 overflow-auto p-4">
+                  {histSelected ? (
+                    <div className="prose prose-invert max-w-none text-slate-200">
+                      <div className="text-xs text-slate-400 mb-2">
+                        {(histSelected.lastGenAt ? `上次: ${new Date(Number(histSelected.lastGenAt)).toLocaleString()} · ` : '')}
+                        {(typeof histSelected.progressPercent==='number') ? `进度: ${histSelected.progressPercent}% · ` : ''}
+                        {(typeof histSelected.aiScore==='number') ? `AI: ${histSelected.aiScore} · ` : ''}
+                        {(typeof histSelected.localScore==='number') ? `本地: ${histSelected.localScore}` : ''}
+                      </div>
+                      {(() => {
+                        let mdSource = String(histSelected.summary || '');
+                        const raw = mdSource;
+                        if (/^\s*\{[\s\S]*\}\s*$/.test(raw)) {
+                          try {
+                            const obj = JSON.parse(raw);
+                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                            if (typeof md === 'string' && md.trim()) {
+                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                              mdSource = md;
+                            }
+                          } catch {}
+                        }
+                        if (mdSource.includes('```')) {
+                          const fenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
+                          mdSource = mdSource.replace(fenceRe, (_m, inner) => {
+                            try {
+                              const obj = JSON.parse(String(inner));
+                              let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                              if (typeof md === 'string' && md.trim()) {
+                                md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                return md;
+                              }
+                            } catch {}
+                            return _m;
+                          });
+                          const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
+                          mdSource = mdSource.replace(inlineFenceRe, (_m, inner) => {
+                            try {
+                              const obj = JSON.parse(String(inner));
+                              let md = obj?.markdown ?? obj?.summary ?? obj?.text;
+                              if (typeof md === 'string' && md.trim()) {
+                                md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+                                return md;
+                              }
+                            } catch {}
+                            return _m;
+                          });
+                        }
+                        return (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {mdSource || '（无内容）'}
+                          </ReactMarkdown>
+                        );
+                      })()}
                     </div>
-                    {(() => {
-                      let mdSource = String(histSelected.summary || '');
-                      const raw = mdSource;
-                      // parse plain JSON object with markdown/summary/text fields
-                      if (/^\s*\{[\s\S]*\}\s*$/.test(raw)) {
-                        try {
-                          const obj = JSON.parse(raw);
-                          let md = obj?.markdown ?? obj?.summary ?? obj?.text;
-                          if (typeof md === 'string' && md.trim()) {
-                            md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-                            mdSource = md;
-                          }
-                        } catch {}
-                      }
-                      // strip fenced JSON blocks ```...``` if they contain a markdown field
-                      if (mdSource.includes('```')) {
-                        const fenceRe = /```[a-zA-Z0-9]*\r?\n([\s\S]*?)\r?\n```/g;
-                        mdSource = mdSource.replace(fenceRe, (_m, inner) => {
-                          try {
-                            const obj = JSON.parse(String(inner));
-                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
-                            if (typeof md === 'string' && md.trim()) {
-                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-                              return md;
-                            }
-                          } catch {}
-                          return _m;
-                        });
-                        const inlineFenceRe = /```[a-zA-Z0-9]*\s*(\{[\s\S]*?\})\s*```/g;
-                        mdSource = mdSource.replace(inlineFenceRe, (_m, inner) => {
-                          try {
-                            const obj = JSON.parse(String(inner));
-                            let md = obj?.markdown ?? obj?.summary ?? obj?.text;
-                            if (typeof md === 'string' && md.trim()) {
-                              md = md.replace(/\\n/g, '\n').replace(/\\"/g, '"');
-                              return md;
-                            }
-                          } catch {}
-                          return _m;
-                        });
-                      }
-                      return (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {mdSource || '（无内容）'}
-                        </ReactMarkdown>
-                      );
-                    })()}
-                  </div>
-                ) : (
-                  <div className="text-slate-400">请选择左侧日期以查看当日总结</div>
-                )}
+                  ) : (
+                    <div className="text-slate-400">请选择左侧日期以查看当日总结</div>
+                  )}
+                </div>
               </section>
             </div>
           )}
